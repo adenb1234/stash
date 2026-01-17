@@ -66,20 +66,42 @@ async function saveHighlight(tab, selectionText) {
     // Fetch existing tags for the selector
     const tags = await supabase.select('tags', { order: 'name.asc' });
 
-    // Show tag selector
-    chrome.tabs.sendMessage(tab.id, {
-      action: 'showTagSelector',
-      saveId: saveId,
-      tags: tags || [],
-      highlightText: selectionText,
-    });
+    // Show tag selector - ensure content script is loaded first
+    try {
+      await chrome.tabs.sendMessage(tab.id, {
+        action: 'showTagSelector',
+        saveId: saveId,
+        tags: tags || [],
+        highlightText: selectionText,
+      });
+    } catch (e) {
+      // Content script not loaded, inject it first
+      console.log('Content script not loaded for tag selector, injecting...');
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['Readability.js', 'content.js']
+      });
+      // Wait a moment for script to initialize
+      await new Promise(r => setTimeout(r, 100));
+      await chrome.tabs.sendMessage(tab.id, {
+        action: 'showTagSelector',
+        saveId: saveId,
+        tags: tags || [],
+        highlightText: selectionText,
+      });
+    }
   } catch (err) {
     console.error('Save highlight failed:', err);
-    chrome.tabs.sendMessage(tab.id, {
-      action: 'showToast',
-      message: 'Failed to save: ' + err.message,
-      isError: true,
-    });
+    try {
+      await chrome.tabs.sendMessage(tab.id, {
+        action: 'showToast',
+        message: 'Failed to save: ' + err.message,
+        isError: true,
+      });
+    } catch (e) {
+      // Content script not available, can't show toast
+      console.error('Could not show error toast:', e);
+    }
   }
 }
 
@@ -225,6 +247,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           save_id: request.saveId,
           tag_id: request.tagId,
         });
+        sendResponse({ success: true });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'updateSave') {
+    (async () => {
+      if (!supabase) await initSupabase();
+      try {
+        await supabase.update('saves', request.saveId, request.updates);
         sendResponse({ success: true });
       } catch (err) {
         sendResponse({ success: false, error: err.message });

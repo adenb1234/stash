@@ -421,6 +421,7 @@ class StashApp {
             <div class="save-card-content">
               <div class="save-card-site">${this.escapeHtml(save.site_name || '')}</div>
               <div class="save-card-highlight">"${this.escapeHtml(save.highlight)}"</div>
+              ${save.note ? `<div class="save-card-note">${this.escapeHtml(save.note)}</div>` : ''}
               <div class="save-card-title">${this.escapeHtml(save.title || 'Untitled')}</div>
               <div class="save-card-meta">
                 <span class="save-card-date">${date}</span>
@@ -580,6 +581,7 @@ class StashApp {
           <div class="save-card-content">
             <div class="save-card-site">${this.escapeHtml(save.site_name || '')}</div>
             <div class="save-card-highlight">"${this.escapeHtml(save.highlight)}"</div>
+            ${save.note ? `<div class="save-card-note">${this.escapeHtml(save.note)}</div>` : ''}
             <div class="save-card-title">${this.escapeHtml(save.title || 'Untitled')}</div>
             <div class="save-card-meta">
               <span class="save-card-date">${date}</span>
@@ -858,6 +860,12 @@ class StashApp {
         <blockquote style="font-style: italic; background: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
           "${this.escapeHtml(save.highlight)}"
         </blockquote>
+        ${save.note ? `
+          <div style="background: #f0fdf4; padding: 16px 20px; border-radius: 8px; margin-bottom: 20px; border-left: 3px solid #22c55e;">
+            <div style="font-size: 12px; color: #16a34a; font-weight: 600; margin-bottom: 6px;">MY NOTE</div>
+            <div style="color: #166534;">${this.escapeHtml(save.note)}</div>
+          </div>
+        ` : ''}
         <p><a href="${save.url}" target="_blank" style="color: var(--primary);">View original →</a></p>
       `;
     } else {
@@ -1318,6 +1326,7 @@ class StashApp {
           ${book.highlights.map(h => `
             <div class="kindle-highlight-card" data-id="${h.id}">
               <div class="kindle-highlight-text">"${this.escapeHtml(h.highlight || '')}"</div>
+              ${h.note ? `<div class="kindle-highlight-note">${this.escapeHtml(h.note)}</div>` : ''}
               <div class="kindle-highlight-meta">
                 ${new Date(h.created_at).toLocaleDateString()}
               </div>

@@ -1,70 +1,78 @@
 # CLAUDE.md
 
-This is a self-hosted read-it-later app to replace Reader.io, based on the open-source Stash project.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Context
-- **Source repo:** https://github.com/kbroose/stash (forked to adenb1234/stash)
-- **Full plan:** See STASH_PROJECT_PLAN_1.md
-- **Current phase:** Phase 1 COMPLETE, working on enhancements
+## Project Overview
 
-## Live URLs
-- **Web App:** https://stash-hazel.vercel.app
-- **Supabase Project:** https://supabase.com/dashboard/project/evpruqiugexseqzdokir
+Self-hosted read-it-later app (Reader.io replacement) based on the open-source Stash project. Saves articles, highlights, and Kindle notes to a personal Supabase database.
 
-## Credentials (already configured in config files)
-- **Supabase URL:** https://evpruqiugexseqzdokir.supabase.co
-- **Supabase Anon Key:** sb_publishable_UiGBcqFdNymYKunGqCsoug_yWROVr5m
-- **User ID:** 341976e3-e922-4da5-a77d-21e22aaef5bb
+**Live:** https://stash-hazel.vercel.app
+**Supabase:** https://supabase.com/dashboard/project/evpruqiugexseqzdokir
+**Full roadmap:** STASH_PROJECT_PLAN_1.md
 
 ## Tech Stack
-- **Frontend:** Vanilla JS, HTML, CSS (no frameworks - keep it that way)
-- **Backend:** Supabase (PostgreSQL + REST API + Auth)
-- **Hosting:** Vercel (auto-deploys from GitHub main branch)
+
+- **Frontend:** Vanilla JS, HTML, CSS — no frameworks, keep it that way
+- **Backend:** Supabase (PostgreSQL + REST API)
+- **Hosting:** Vercel (auto-deploys from main branch)
 - **Extension:** Chrome Manifest V3
 
-## What's Working
-- Chrome extension saves articles and highlights
-- Web app displays saves at https://stash-hazel.vercel.app
-- Folder filtering (click folder in sidebar to filter)
-- Tag filtering (click tag in sidebar to filter)
-- Search, favorites, archive
-- PWA - can install on phone via "Add to Home Screen"
+## Architecture
 
-## Current Work in Progress
-- **Tag selector when saving highlights:** When user right-clicks and saves a highlight, a modal should pop up letting them select/create tags. The code is implemented in:
-  - `extension/background.js` - sends tags to content script after save
-  - `extension/content.js` - `showTagSelector()` function renders the modal
-- **Issue:** The tag selector modal isn't appearing. Need to debug.
+### Chrome Extension (`extension/`)
+- `background.js` — Service worker handling context menus, Supabase operations, message passing
+- `content.js` — Injected into pages for article extraction (uses Readability.js) and UI overlays (toast, tag selector modal)
+- `popup.js/html` — Extension popup UI
+- `supabase.js` — Lightweight Supabase client wrapper
+- `config.js` — Credentials (USER_ID, SUPABASE_URL, SUPABASE_ANON_KEY)
 
-## Key Files
-- `extension/config.js` - Chrome extension config (configured)
-- `extension/background.js` - Extension background script (handles saves)
-- `extension/content.js` - Content script (article extraction, tag selector UI)
-- `web/config.js` - Web app config (configured)
-- `web/app.js` - Main web app code
-- `supabase/schema.sql` - Database schema
+### Web App (`web/`)
+- `app.js` — Single-file SPA (`StashApp` class) with all views: saves list, reading pane, Kindle import, stats, digest settings
+- `index.html` — Main HTML with sidebar nav, modals, reading pane
+- `styles.css` — All styling including dark mode via `[data-theme="dark"]`
+- `config.js` — Same credentials as extension
+- `sw.js` — Service worker for PWA offline support
 
-## Database Notes
-- RLS policies are set up for single-user mode using the hardcoded USER_ID
-- Added custom policies to bypass auth.uid() checks:
-  ```sql
-  CREATE POLICY "Allow single user insert" ON saves
-    FOR INSERT WITH CHECK (user_id = '341976e3-e922-4da5-a77d-21e22aaef5bb'::uuid);
-  ```
-- Same pattern used for saves, folders, tags, save_tags tables
+### Database (`supabase/`)
+- `schema.sql` — Full schema: `saves`, `tags`, `save_tags`, `folders`, `user_preferences`
+- Full-text search via `fts` tsvector column on saves
+- RLS policies configured for single-user mode with hardcoded USER_ID
 
-## Git Workflow
-- Push to main → Vercel auto-deploys web app
-- Extension changes need manual reload at chrome://extensions
+### Data Flow
+1. Extension saves via `supabase.insert()` → Supabase REST API
+2. Web app reads via Supabase JS client with same credentials
+3. `save_tags` junction table links saves ↔ tags (many-to-many)
+4. `search_saves()` PostgreSQL function handles weighted FTS
 
-## Commands
+## Development
+
 ```bash
-# Push changes (triggers Vercel deploy for web/)
+# Deploy web changes (push triggers Vercel)
 git add . && git commit -m "message" && git push
 
-# Reload extension after changes
-# Go to chrome://extensions → click refresh on Stash card
+# Test extension changes
+# 1. Go to chrome://extensions
+# 2. Click refresh on Stash card
+# 3. Test on any webpage
 ```
 
-## Phase 2 Preview (RSS Feeds)
-When we get there, feed items should extend the `saves` table (add `feed_id`, `guid`, `is_read`) rather than being a separate table. This lets feed items use existing tags/folders/search.
+No build step. Edit files directly, push to deploy web app, reload extension manually.
+
+## Configured Credentials
+
+Already in config files:
+- **Supabase URL:** https://evpruqiugexseqzdokir.supabase.co
+- **User ID:** 341976e3-e922-4da5-a77d-21e22aaef5bb
+
+RLS policies bypass `auth.uid()` using this hardcoded USER_ID.
+
+## Current WIP
+
+**Tag selector modal not appearing on highlight save:**
+- `background.js:saveHighlight()` sends `showTagSelector` message after insert
+- `content.js:showTagSelector()` should render modal
+- Debug: check if message is received, if content script is injected
+
+## Phase 2 (Future)
+
+RSS feed support — extend `saves` table with `feed_id`, `guid`, `is_read` rather than separate table. Lets feed items use existing tags/folders/search infrastructure.

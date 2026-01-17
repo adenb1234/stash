@@ -26,6 +26,7 @@ create table saves (
   excerpt text,
   content text, -- full article text
   highlight text, -- if this is a highlight save
+  note text, -- user's note/annotation for the highlight
 
   -- Metadata
   site_name text,

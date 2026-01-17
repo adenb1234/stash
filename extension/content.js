@@ -1,8 +1,16 @@
 // Content script - runs on every page
 // Handles article extraction and highlight detection
 
+// Prevent duplicate initialization if script is injected multiple times
+if (window.__stashContentScriptLoaded) {
+  console.log('Stash content script already loaded, skipping initialization');
+} else {
+  window.__stashContentScriptLoaded = true;
+}
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Stash content script received message:', request.action);
   if (request.action === 'extractArticle') {
     // Handle async extraction
     extractArticle().then(article => {
@@ -330,6 +338,8 @@ function showToast(message, isError = false) {
 
 // Tag Selector Modal
 function showTagSelector(saveId, tags, highlightText) {
+  console.log('showTagSelector called with:', { saveId, tagsCount: tags?.length, highlightText: highlightText?.substring(0, 50) });
+
   // Remove any existing selector
   const existing = document.getElementById('stash-tag-selector');
   if (existing) existing.remove();
@@ -345,6 +355,9 @@ function showTagSelector(saveId, tags, highlightText) {
         <button class="stash-close-btn">&times;</button>
       </div>
       <div class="stash-highlight-preview">"${highlightText.substring(0, 100)}${highlightText.length > 100 ? '...' : ''}"</div>
+      <div class="stash-note-container">
+        <textarea class="stash-note-input" placeholder="Add a note... (optional)"></textarea>
+      </div>
       <div class="stash-search-container">
         <input type="text" class="stash-tag-search" placeholder="Search or create tag...">
       </div>
@@ -439,6 +452,29 @@ function showTagSelector(saveId, tags, highlightText) {
       color: #666;
       font-style: italic;
       border-bottom: 1px solid #eee;
+    }
+    .stash-note-container {
+      padding: 12px 20px;
+      border-bottom: 1px solid #eee;
+    }
+    .stash-note-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 60px;
+      max-height: 120px;
+      outline: none;
+    }
+    .stash-note-input:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    }
+    .stash-note-input::placeholder {
+      color: #999;
     }
     .stash-search-container {
       padding: 12px 20px;
@@ -537,12 +573,14 @@ function showTagSelector(saveId, tags, highlightText) {
 
   document.head.appendChild(style);
   document.body.appendChild(modal);
+  console.log('Tag selector modal appended to DOM');
 
   // State
   let selectedTags = [];
   let allTags = [...tags];
 
   // Elements
+  const noteInput = modal.querySelector('.stash-note-input');
   const searchInput = modal.querySelector('.stash-tag-search');
   const tagsList = modal.querySelector('.stash-tags-list');
   const createTagDiv = modal.querySelector('.stash-create-tag');
@@ -553,6 +591,20 @@ function showTagSelector(saveId, tags, highlightText) {
   const closeBtn = modal.querySelector('.stash-close-btn');
   const overlay = modal.querySelector('.stash-modal-overlay');
 
+  // Helper to save note if present
+  async function saveNote() {
+    const note = noteInput.value.trim();
+    if (note && saveId) {
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          action: 'updateSave',
+          saveId: saveId,
+          updates: { note: note }
+        }, resolve);
+      });
+    }
+  }
+
   // Close modal
   function closeModal() {
     modal.style.animation = 'stashModalIn 0.15s ease reverse';
@@ -562,10 +614,15 @@ function showTagSelector(saveId, tags, highlightText) {
     }, 150);
   }
 
-  // Update done button state
+  // Update done button state - enabled if there are tags or a note
   function updateDoneButton() {
-    doneBtn.disabled = selectedTags.length === 0;
+    const hasNote = noteInput.value.trim().length > 0;
+    const hasTags = selectedTags.length > 0;
+    doneBtn.disabled = !hasNote && !hasTags;
   }
+
+  // Update done button when note changes
+  noteInput.addEventListener('input', updateDoneButton);
 
   // Handle tag click
   tagsList.addEventListener('click', (e) => {
@@ -647,10 +704,13 @@ function showTagSelector(saveId, tags, highlightText) {
     });
   });
 
-  // Done - save selected tags
+  // Done - save selected tags and note
   doneBtn.addEventListener('click', async () => {
     doneBtn.textContent = 'Saving...';
     doneBtn.disabled = true;
+
+    // Save note if present
+    await saveNote();
 
     // Add each selected tag to the save
     for (const tag of selectedTags) {
@@ -663,28 +723,48 @@ function showTagSelector(saveId, tags, highlightText) {
       });
     }
 
-    showToast(`Highlight saved with ${selectedTags.length} tag${selectedTags.length > 1 ? 's' : ''}!`);
+    const note = noteInput.value.trim();
+    const hasNote = note.length > 0;
+    const hasTags = selectedTags.length > 0;
+
+    let message = 'Highlight saved';
+    if (hasTags && hasNote) {
+      message += ` with ${selectedTags.length} tag${selectedTags.length > 1 ? 's' : ''} and note`;
+    } else if (hasTags) {
+      message += ` with ${selectedTags.length} tag${selectedTags.length > 1 ? 's' : ''}`;
+    } else if (hasNote) {
+      message += ' with note';
+    }
+    message += '!';
+
+    showToast(message);
     closeModal();
   });
 
-  // Skip - close without tagging
-  skipBtn.addEventListener('click', () => {
-    showToast('Highlight saved!');
+  // Skip - close but still save note if present
+  skipBtn.addEventListener('click', async () => {
+    await saveNote();
+    const note = noteInput.value.trim();
+    showToast(note ? 'Highlight saved with note!' : 'Highlight saved!');
     closeModal();
   });
 
-  // Close button
-  closeBtn.addEventListener('click', () => {
-    showToast('Highlight saved!');
+  // Close button - save note if present
+  closeBtn.addEventListener('click', async () => {
+    await saveNote();
+    const note = noteInput.value.trim();
+    showToast(note ? 'Highlight saved with note!' : 'Highlight saved!');
     closeModal();
   });
 
-  // Click overlay to close
-  overlay.addEventListener('click', () => {
-    showToast('Highlight saved!');
+  // Click overlay to close - save note if present
+  overlay.addEventListener('click', async () => {
+    await saveNote();
+    const note = noteInput.value.trim();
+    showToast(note ? 'Highlight saved with note!' : 'Highlight saved!');
     closeModal();
   });
 
-  // Focus search input
-  setTimeout(() => searchInput.focus(), 100);
+  // Focus note input
+  setTimeout(() => noteInput.focus(), 100);
 }
