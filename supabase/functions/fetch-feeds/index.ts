@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { parseHTML } from "https://esm.sh/linkedom@0.16.8";
+import { XMLParser } from "https://esm.sh/fast-xml-parser@4.3.2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,6 +9,14 @@ const corsHeaders = {
 };
 
 const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// XML Parser configured to handle RSS/Atom feeds
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  textNodeName: "#text",
+  isArray: (name) => ['item', 'entry'].includes(name),
+});
 
 // Detect if URL is a Substack and convert to RSS
 function convertToFeedUrl(url: string): string {
@@ -28,26 +36,58 @@ function convertToFeedUrl(url: string): string {
 
 // Try to discover feed URL from HTML page
 function discoverFeedFromHtml(html: string, baseUrl: string): string | null {
-  const { document } = parseHTML(html);
+  // Simple regex-based discovery (faster and more reliable than DOM parsing for this)
+  const linkRegex = /<link[^>]+(?:type=["']application\/(?:rss|atom)\+xml["']|rel=["']alternate["'][^>]+type=["'][^"']*xml[^"']*["'])[^>]*>/gi;
+  const matches = html.match(linkRegex);
 
-  // Look for RSS/Atom link tags
-  const feedLinks = document.querySelectorAll(
-    'link[type="application/rss+xml"], link[type="application/atom+xml"], link[rel="alternate"][type*="xml"]'
-  );
-
-  for (const link of feedLinks) {
-    const href = link.getAttribute('href');
-    if (href) {
-      // Handle relative URLs
-      if (href.startsWith('/')) {
-        const base = new URL(baseUrl);
-        return `${base.origin}${href}`;
+  if (matches) {
+    for (const match of matches) {
+      const hrefMatch = match.match(/href=["']([^"']+)["']/i);
+      if (hrefMatch) {
+        const href = hrefMatch[1];
+        // Handle relative URLs
+        if (href.startsWith('/')) {
+          const base = new URL(baseUrl);
+          return `${base.origin}${href}`;
+        }
+        if (href.startsWith('http')) {
+          return href;
+        }
       }
-      return href;
     }
   }
 
   return null;
+}
+
+// Strip HTML tags from text
+function stripHtml(html: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Extract first image from HTML content
+function extractFirstImage(html: string): string | null {
+  if (!html) return null;
+  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return match ? match[1] : null;
+}
+
+// Get text content from a parsed XML node (handles both string and object with #text)
+function getText(node: any): string {
+  if (!node) return '';
+  if (typeof node === 'string') return node;
+  if (typeof node === 'object' && node['#text']) return node['#text'];
+  return '';
 }
 
 // Parse RSS/Atom XML into normalized items
@@ -66,60 +106,58 @@ function parseFeed(xml: string, feedUrl: string): {
     publishedAt: string | null;
   }>;
 } {
-  const { document } = parseHTML(xml);
+  const parsed = xmlParser.parse(xml);
 
   // Try RSS 2.0 format first
-  const channel = document.querySelector('channel');
-  if (channel) {
-    return parseRss(channel, feedUrl);
+  if (parsed.rss?.channel) {
+    return parseRss(parsed.rss.channel, feedUrl);
   }
 
   // Try Atom format
-  const feed = document.querySelector('feed');
-  if (feed) {
-    return parseAtom(feed, feedUrl);
+  if (parsed.feed) {
+    return parseAtom(parsed.feed, feedUrl);
   }
 
-  throw new Error('Unknown feed format');
+  // Try RSS 1.0 / RDF format
+  if (parsed['rdf:RDF']) {
+    return parseRdf(parsed['rdf:RDF'], feedUrl);
+  }
+
+  throw new Error('Unknown feed format - could not find rss, feed, or rdf:RDF root element');
 }
 
 function parseRss(channel: any, feedUrl: string) {
-  const title = channel.querySelector('title')?.textContent || 'Unknown Feed';
-  const description = channel.querySelector('description')?.textContent || '';
-  const siteUrl = channel.querySelector('link')?.textContent || feedUrl;
+  const title = getText(channel.title) || 'Unknown Feed';
+  const description = getText(channel.description) || '';
+  const siteUrl = getText(channel.link) || feedUrl;
 
   const items: any[] = [];
-  const itemNodes = channel.querySelectorAll('item');
+  const itemNodes = channel.item || [];
 
   for (const item of itemNodes) {
-    const guid = item.querySelector('guid')?.textContent ||
-                 item.querySelector('link')?.textContent ||
-                 `${Date.now()}-${Math.random()}`;
-
-    const url = item.querySelector('link')?.textContent || '';
-    const itemTitle = item.querySelector('title')?.textContent || 'Untitled';
+    const guid = getText(item.guid) || getText(item.link) || `${Date.now()}-${Math.random()}`;
+    const url = getText(item.link) || '';
+    const itemTitle = getText(item.title) || 'Untitled';
 
     // Get content from different possible fields
-    const contentEncoded = item.querySelector('content\\:encoded, encoded')?.textContent || '';
-    const descriptionText = item.querySelector('description')?.textContent || '';
+    const contentEncoded = getText(item['content:encoded']) || '';
+    const descriptionText = getText(item.description) || '';
     const content = contentEncoded || descriptionText;
 
     // Extract excerpt (first 300 chars of plain text)
-    const { document: contentDoc } = parseHTML(content);
-    const plainText = contentDoc.body?.textContent || content;
+    const plainText = stripHtml(content);
     const excerpt = plainText.substring(0, 300).trim() + (plainText.length > 300 ? '...' : '');
 
     // Get author
-    const author = item.querySelector('author')?.textContent ||
-                   item.querySelector('dc\\:creator, creator')?.textContent || '';
+    const author = getText(item.author) || getText(item['dc:creator']) || '';
 
     // Get image
-    const mediaContent = item.querySelector('media\\:content, content')?.getAttribute('url');
-    const enclosure = item.querySelector('enclosure[type^="image"]')?.getAttribute('url');
+    const mediaContent = item['media:content']?.['@_url'] || item['media:thumbnail']?.['@_url'];
+    const enclosure = item.enclosure?.['@_type']?.startsWith('image') ? item.enclosure['@_url'] : null;
     const imageUrl = mediaContent || enclosure || extractFirstImage(content);
 
     // Get published date
-    const pubDate = item.querySelector('pubDate')?.textContent;
+    const pubDate = getText(item.pubDate);
     let publishedAt = null;
     if (pubDate) {
       try {
@@ -145,44 +183,56 @@ function parseRss(channel: any, feedUrl: string) {
 }
 
 function parseAtom(feed: any, feedUrl: string) {
-  const title = feed.querySelector('title')?.textContent || 'Unknown Feed';
-  const subtitle = feed.querySelector('subtitle')?.textContent || '';
-  const linkNode = feed.querySelector('link[rel="alternate"], link:not([rel])');
-  const siteUrl = linkNode?.getAttribute('href') || feedUrl;
+  const title = getText(feed.title) || 'Unknown Feed';
+  const subtitle = getText(feed.subtitle) || '';
+
+  // Get site URL from link element
+  let siteUrl = feedUrl;
+  const links = Array.isArray(feed.link) ? feed.link : [feed.link].filter(Boolean);
+  for (const link of links) {
+    if (link['@_rel'] === 'alternate' || !link['@_rel']) {
+      siteUrl = link['@_href'] || siteUrl;
+      break;
+    }
+  }
 
   const items: any[] = [];
-  const entries = feed.querySelectorAll('entry');
+  const entries = feed.entry || [];
 
   for (const entry of entries) {
-    const guid = entry.querySelector('id')?.textContent ||
-                 entry.querySelector('link')?.getAttribute('href') ||
-                 `${Date.now()}-${Math.random()}`;
+    const guid = getText(entry.id) || '';
 
-    const linkEl = entry.querySelector('link[rel="alternate"], link:not([rel])');
-    const url = linkEl?.getAttribute('href') || '';
+    // Get URL from link element
+    let url = '';
+    const entryLinks = Array.isArray(entry.link) ? entry.link : [entry.link].filter(Boolean);
+    for (const link of entryLinks) {
+      if (link['@_rel'] === 'alternate' || !link['@_rel']) {
+        url = link['@_href'] || '';
+        break;
+      }
+    }
 
-    const itemTitle = entry.querySelector('title')?.textContent || 'Untitled';
+    const itemTitle = getText(entry.title) || 'Untitled';
 
     // Get content
-    const contentEl = entry.querySelector('content');
-    const summaryEl = entry.querySelector('summary');
-    const content = contentEl?.textContent || summaryEl?.textContent || '';
+    const contentEl = entry.content;
+    const summaryEl = entry.summary;
+    const content = getText(contentEl) || getText(summaryEl) || '';
 
     // Extract excerpt
-    const { document: contentDoc } = parseHTML(content);
-    const plainText = contentDoc.body?.textContent || content;
+    const plainText = stripHtml(content);
     const excerpt = plainText.substring(0, 300).trim() + (plainText.length > 300 ? '...' : '');
 
     // Get author
-    const authorName = entry.querySelector('author name')?.textContent || '';
+    const authorEl = entry.author;
+    const authorName = authorEl?.name ? getText(authorEl.name) : '';
 
     // Get image
-    const mediaContent = entry.querySelector('media\\:content, content[type^="image"]')?.getAttribute('url');
+    const mediaContent = entry['media:content']?.['@_url'] || entry['media:thumbnail']?.['@_url'];
     const imageUrl = mediaContent || extractFirstImage(content);
 
     // Get published date
-    const published = entry.querySelector('published')?.textContent ||
-                      entry.querySelector('updated')?.textContent;
+    const published = getText(entry.published) || getText(entry.updated);
     let publishedAt = null;
     if (published) {
       try {
@@ -193,7 +243,7 @@ function parseAtom(feed: any, feedUrl: string) {
     }
 
     items.push({
-      guid,
+      guid: guid || url || `${Date.now()}-${Math.random()}`,
       url,
       title: itemTitle,
       excerpt,
@@ -207,16 +257,49 @@ function parseAtom(feed: any, feedUrl: string) {
   return { title, description: subtitle, siteUrl, items };
 }
 
-// Extract first image from HTML content
-function extractFirstImage(html: string): string | null {
-  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
-  return match ? match[1] : null;
-}
+function parseRdf(rdf: any, feedUrl: string) {
+  const channel = rdf.channel || {};
+  const title = getText(channel.title) || 'Unknown Feed';
+  const description = getText(channel.description) || '';
+  const siteUrl = getText(channel.link) || feedUrl;
 
-// Strip HTML tags
-function stripHtml(html: string): string {
-  const { document } = parseHTML(html);
-  return document.body?.textContent || html;
+  const items: any[] = [];
+  const itemNodes = rdf.item || [];
+
+  for (const item of itemNodes) {
+    const guid = getText(item['@_rdf:about']) || getText(item.link) || `${Date.now()}-${Math.random()}`;
+    const url = getText(item.link) || '';
+    const itemTitle = getText(item.title) || 'Untitled';
+    const content = getText(item.description) || getText(item['content:encoded']) || '';
+
+    const plainText = stripHtml(content);
+    const excerpt = plainText.substring(0, 300).trim() + (plainText.length > 300 ? '...' : '');
+
+    const author = getText(item['dc:creator']) || '';
+
+    const pubDate = getText(item['dc:date']);
+    let publishedAt = null;
+    if (pubDate) {
+      try {
+        publishedAt = new Date(pubDate).toISOString();
+      } catch (e) {
+        // Ignore
+      }
+    }
+
+    items.push({
+      guid,
+      url,
+      title: itemTitle,
+      excerpt,
+      content: stripHtml(content).substring(0, 50000),
+      author,
+      imageUrl: extractFirstImage(content),
+      publishedAt,
+    });
+  }
+
+  return { title, description, siteUrl, items };
 }
 
 // Fetch and validate a feed URL
@@ -265,11 +348,14 @@ serve(async (req) => {
       }
 
       let feedUrl = convertToFeedUrl(url);
+      let lastError = "";
 
       // Try the converted URL first
       try {
+        console.log("Trying to fetch:", feedUrl);
         const xml = await fetchFeed(feedUrl);
-        if (xml.includes('<rss') || xml.includes('<feed') || xml.includes('<channel')) {
+        console.log("Got XML, length:", xml.length, "starts with:", xml.substring(0, 100));
+        if (xml.includes('<rss') || xml.includes('<feed') || xml.includes('<channel') || xml.includes('rdf:RDF')) {
           const parsed = parseFeed(xml, feedUrl);
           return new Response(
             JSON.stringify({
@@ -285,6 +371,8 @@ serve(async (req) => {
         }
       } catch (e) {
         // URL wasn't a direct feed, try to discover from HTML
+        lastError = `Direct fetch failed: ${e.message}`;
+        console.log(lastError);
       }
 
       // Fetch the page and look for feed links
@@ -319,7 +407,7 @@ serve(async (req) => {
         try {
           const tryUrl = `${baseUrl.origin}${path}`;
           const xml = await fetchFeed(tryUrl);
-          if (xml.includes('<rss') || xml.includes('<feed') || xml.includes('<channel')) {
+          if (xml.includes('<rss') || xml.includes('<feed') || xml.includes('<channel') || xml.includes('rdf:RDF')) {
             const parsed = parseFeed(xml, tryUrl);
             return new Response(
               JSON.stringify({
@@ -339,7 +427,7 @@ serve(async (req) => {
       }
 
       return new Response(
-        JSON.stringify({ error: "Could not find RSS/Atom feed for this URL" }),
+        JSON.stringify({ error: "Could not find RSS/Atom feed for this URL. " + lastError }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
