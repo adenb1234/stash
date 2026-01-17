@@ -16,6 +16,14 @@ class StashApp {
     this.audio = null;
     this.isPlaying = false;
 
+    // Feed state
+    this.feeds = [];
+    this.feedCategories = [];
+    this.feedItems = [];
+    this.feedViewTab = 'unseen'; // 'unseen' or 'seen'
+    this.currentFeedCategory = null;
+    this.discoveredFeed = null; // Stores discovered feed info before subscribing
+
     this.init();
   }
 
@@ -263,6 +271,49 @@ class StashApp {
     document.getElementById('digest-enabled').addEventListener('change', () => {
       this.updateDigestOptionsState();
     });
+
+    // Add Feed Modal
+    const addFeedModal = document.getElementById('add-feed-modal');
+
+    document.getElementById('add-feed-btn').addEventListener('click', () => {
+      this.showAddFeedModal();
+    });
+
+    addFeedModal.querySelector('.modal-overlay').addEventListener('click', () => {
+      this.hideAddFeedModal();
+    });
+    addFeedModal.querySelector('.modal-close-btn').addEventListener('click', () => {
+      this.hideAddFeedModal();
+    });
+    document.getElementById('feed-cancel-btn').addEventListener('click', () => {
+      this.hideAddFeedModal();
+    });
+    document.getElementById('feed-subscribe-btn').addEventListener('click', () => {
+      this.subscribeFeed();
+    });
+
+    // Feed URL input with debounced discovery
+    let feedUrlTimeout;
+    document.getElementById('feed-url-input').addEventListener('input', (e) => {
+      clearTimeout(feedUrlTimeout);
+      feedUrlTimeout = setTimeout(() => {
+        const url = e.target.value.trim();
+        if (url && url.startsWith('http')) {
+          this.discoverFeed(url);
+        }
+      }, 500);
+    });
+
+    // Add category in modal
+    document.getElementById('add-category-btn').addEventListener('click', () => {
+      this.addCategoryInModal();
+    });
+    document.getElementById('new-category-input').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.addCategoryInModal();
+      }
+    });
   }
 
   showAuthScreen() {
@@ -344,7 +395,10 @@ class StashApp {
       this.loadSaves(),
       this.loadTags(),
       this.loadFolders(),
+      this.loadFeeds(),
+      this.loadFeedCategories(),
     ]);
+    this.updateFeedUnreadBadge();
   }
 
   async loadSaves() {
@@ -802,6 +856,7 @@ class StashApp {
     this.currentView = view;
     this.currentFolder = null;
     this.currentTag = null;
+    this.currentFeedCategory = null;
 
     // Update nav
     document.querySelectorAll('.nav-item[data-view]').forEach(item => {
@@ -813,6 +868,9 @@ class StashApp {
     document.querySelectorAll('.tag').forEach(item => {
       item.classList.remove('active');
     });
+    document.querySelectorAll('.feed-category-item').forEach(item => {
+      item.classList.remove('active');
+    });
 
     // Update title
     const titles = {
@@ -822,6 +880,8 @@ class StashApp {
       kindle: 'Kindle Highlights',
       archived: 'Archived',
       stats: 'Stats',
+      feeds: 'Feed Inbox',
+      'manage-feeds': 'Manage Feeds',
     };
     document.getElementById('view-title').textContent = titles[view] || 'Saves';
 
@@ -829,6 +889,10 @@ class StashApp {
       this.showStats();
     } else if (view === 'kindle') {
       this.loadKindleHighlights();
+    } else if (view === 'feeds') {
+      this.loadFeedItems();
+    } else if (view === 'manage-feeds') {
+      this.renderManageFeedsView();
     } else {
       this.loadSaves();
     }
@@ -1725,6 +1789,864 @@ class StashApp {
     } finally {
       saveBtn.disabled = false;
       saveBtn.textContent = 'Save Settings';
+    }
+  }
+
+  // ==================== FEEDS ====================
+
+  async loadFeeds() {
+    const { data, error } = await this.supabase
+      .from('feeds')
+      .select('*, feed_category_feeds(category_id)')
+      .order('title');
+
+    if (error) {
+      console.error('Error loading feeds:', error);
+      return;
+    }
+
+    this.feeds = data || [];
+  }
+
+  async loadFeedCategories() {
+    const { data, error } = await this.supabase
+      .from('feed_categories')
+      .select('*')
+      .order('sort_order', { ascending: true });
+
+    if (error) {
+      console.error('Error loading feed categories:', error);
+      return;
+    }
+
+    this.feedCategories = data || [];
+    this.renderFeedCategoriesSidebar();
+  }
+
+  renderFeedCategoriesSidebar() {
+    const container = document.getElementById('feed-categories-list');
+    if (!container) return;
+
+    container.innerHTML = this.feedCategories.map(cat => `
+      <div class="feed-category-item${this.currentFeedCategory === cat.id ? ' active' : ''}" data-category-id="${cat.id}">
+        <span class="feed-category-dot" style="background: ${cat.color || '#6366f1'}"></span>
+        ${this.escapeHtml(cat.name)}
+      </div>
+    `).join('');
+
+    container.querySelectorAll('.feed-category-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const categoryId = el.dataset.categoryId;
+        this.filterFeedsByCategory(categoryId);
+      });
+    });
+  }
+
+  async loadFeedItems() {
+    const container = document.getElementById('saves-container');
+    const loading = document.getElementById('loading');
+    const empty = document.getElementById('empty-state');
+
+    loading.classList.remove('hidden');
+    container.innerHTML = '';
+
+    let query = this.supabase
+      .from('feed_items')
+      .select('*, feeds(title, site_url)')
+      .order('published_at', { ascending: false })
+      .limit(100);
+
+    // Filter by seen/unseen
+    query = query.eq('is_seen', this.feedViewTab === 'seen');
+
+    // Filter by category if selected
+    if (this.currentFeedCategory) {
+      const { data: feedIds } = await this.supabase
+        .from('feed_category_feeds')
+        .select('feed_id')
+        .eq('category_id', this.currentFeedCategory);
+
+      if (feedIds && feedIds.length > 0) {
+        query = query.in('feed_id', feedIds.map(f => f.feed_id));
+      } else {
+        // No feeds in this category
+        loading.classList.add('hidden');
+        this.feedItems = [];
+        this.renderFeedInbox();
+        return;
+      }
+    }
+
+    const { data, error } = await query;
+
+    loading.classList.add('hidden');
+
+    if (error) {
+      console.error('Error loading feed items:', error);
+      return;
+    }
+
+    this.feedItems = data || [];
+    this.renderFeedInbox();
+  }
+
+  renderFeedInbox() {
+    const container = document.getElementById('saves-container');
+    const empty = document.getElementById('empty-state');
+
+    if (this.feeds.length === 0) {
+      container.innerHTML = `
+        <div class="feeds-empty-state">
+          <div class="feeds-empty-icon">📡</div>
+          <h3>No feeds yet</h3>
+          <p>Subscribe to RSS feeds to see articles here.</p>
+          <button class="btn primary" id="empty-add-feed-btn">Add Your First Feed</button>
+        </div>
+      `;
+      document.getElementById('empty-add-feed-btn')?.addEventListener('click', () => {
+        this.showAddFeedModal();
+      });
+      empty.classList.add('hidden');
+      return;
+    }
+
+    // Feed controls bar
+    const controlsHtml = `
+      <div class="feed-controls">
+        <div class="feed-tabs">
+          <button class="feed-tab${this.feedViewTab === 'unseen' ? ' active' : ''}" data-tab="unseen">Unseen</button>
+          <button class="feed-tab${this.feedViewTab === 'seen' ? ' active' : ''}" data-tab="seen">Seen</button>
+        </div>
+        <div class="feed-actions">
+          <button class="feed-action-btn" id="mark-all-seen-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            Mark all seen
+          </button>
+          <button class="feed-action-btn" id="refresh-feeds-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+    `;
+
+    if (this.feedItems.length === 0) {
+      container.innerHTML = controlsHtml + `
+        <div class="feeds-empty-state">
+          <div class="feeds-empty-icon">${this.feedViewTab === 'unseen' ? '✨' : '📚'}</div>
+          <h3>${this.feedViewTab === 'unseen' ? 'All caught up!' : 'No seen items'}</h3>
+          <p>${this.feedViewTab === 'unseen' ? 'No new items to read.' : 'Items you read will appear here.'}</p>
+        </div>
+      `;
+      this.bindFeedControlEvents();
+      empty.classList.add('hidden');
+      return;
+    }
+
+    empty.classList.add('hidden');
+
+    const itemsHtml = this.feedItems.map(item => `
+      <div class="feed-item-card${item.is_seen ? ' seen' : ''}" data-id="${item.id}">
+        ${item.image_url ? `<img class="feed-item-thumbnail" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
+        <div class="feed-item-content">
+          <div class="feed-item-title">${this.escapeHtml(item.title || 'Untitled')}</div>
+          <div class="feed-item-excerpt">${this.escapeHtml(item.excerpt || '')}</div>
+          <div class="feed-item-meta">
+            <span class="feed-item-source">${this.escapeHtml(item.feeds?.title || 'Unknown')}</span>
+            ${item.author ? `<span class="feed-item-dot"></span><span>${this.escapeHtml(item.author)}</span>` : ''}
+            ${item.published_at ? `<span class="feed-item-dot"></span><span>${this.formatRelativeDate(item.published_at)}</span>` : ''}
+          </div>
+        </div>
+        <div class="feed-item-actions">
+          <button class="feed-item-save-btn${item.is_saved ? ' saved' : ''}" data-item-id="${item.id}" title="${item.is_saved ? 'Saved to library' : 'Save to library'}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="${item.is_saved ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
+              <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    `).join('');
+
+    container.innerHTML = controlsHtml + `<div class="feed-items-grid">${itemsHtml}</div>`;
+    this.bindFeedControlEvents();
+    this.bindFeedItemEvents();
+  }
+
+  bindFeedControlEvents() {
+    // Tab switching
+    document.querySelectorAll('.feed-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        this.feedViewTab = tab.dataset.tab;
+        this.loadFeedItems();
+      });
+    });
+
+    // Mark all seen
+    document.getElementById('mark-all-seen-btn')?.addEventListener('click', () => {
+      this.markAllFeedItemsSeen();
+    });
+
+    // Refresh feeds
+    document.getElementById('refresh-feeds-btn')?.addEventListener('click', () => {
+      this.refreshFeeds();
+    });
+  }
+
+  bindFeedItemEvents() {
+    // Click to open item
+    document.querySelectorAll('.feed-item-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        // Don't open if clicking save button
+        if (e.target.closest('.feed-item-save-btn')) return;
+
+        const id = card.dataset.id;
+        const item = this.feedItems.find(i => i.id === id);
+        if (item) {
+          this.openFeedItem(item);
+        }
+      });
+    });
+
+    // Save button
+    document.querySelectorAll('.feed-item-save-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const itemId = btn.dataset.itemId;
+        await this.saveFeedItemToLibrary(itemId);
+      });
+    });
+  }
+
+  formatRelativeDate(dateString) {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  }
+
+  async openFeedItem(item) {
+    // Mark as seen
+    if (!item.is_seen) {
+      await this.supabase
+        .from('feed_items')
+        .update({ is_seen: true })
+        .eq('id', item.id);
+
+      item.is_seen = true;
+      this.updateFeedUnreadBadge();
+    }
+
+    // Open in reading pane
+    const pane = document.getElementById('reading-pane');
+    this.currentSave = null;
+
+    document.getElementById('reading-title').textContent = item.title || 'Untitled';
+    document.getElementById('reading-meta').innerHTML = `
+      ${item.feeds?.title || ''} ${item.author ? `· ${item.author}` : ''} · ${item.published_at ? new Date(item.published_at).toLocaleDateString() : ''}
+    `;
+
+    // Hide audio player for feed items
+    document.getElementById('audio-player').classList.add('hidden');
+    document.getElementById('audio-generating').classList.add('hidden');
+
+    const content = item.content || item.excerpt || 'No content available.';
+    document.getElementById('reading-body').innerHTML = this.renderMarkdown(content) + `
+      <p style="margin-top: 24px;"><a href="${item.url}" target="_blank" style="color: var(--primary);">Read original →</a></p>
+    `;
+
+    document.getElementById('open-original-btn').href = item.url || '#';
+
+    // Hide archive/favorite for feed items (not saved yet)
+    document.getElementById('archive-btn').classList.add('hidden');
+    document.getElementById('favorite-btn').classList.add('hidden');
+    document.getElementById('delete-btn').classList.add('hidden');
+
+    pane.classList.remove('hidden');
+    requestAnimationFrame(() => {
+      pane.classList.add('open');
+    });
+  }
+
+  async markAllFeedItemsSeen() {
+    if (this.feedViewTab !== 'unseen') return;
+
+    const unseenIds = this.feedItems.filter(i => !i.is_seen).map(i => i.id);
+    if (unseenIds.length === 0) return;
+
+    await this.supabase
+      .from('feed_items')
+      .update({ is_seen: true })
+      .in('id', unseenIds);
+
+    this.updateFeedUnreadBadge();
+    this.loadFeedItems();
+  }
+
+  async refreshFeeds() {
+    const btn = document.getElementById('refresh-feeds-btn');
+    if (btn) {
+      btn.classList.add('refreshing');
+      btn.disabled = true;
+    }
+
+    try {
+      const response = await fetch(`${CONFIG.SUPABASE_URL}/functions/v1/fetch-feeds`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': CONFIG.SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          action: 'fetch_all',
+          user_id: this.user.id,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.error) {
+        alert('Error refreshing feeds: ' + result.error);
+      } else if (result.new_items > 0) {
+        this.updateFeedUnreadBadge();
+        this.loadFeedItems();
+      }
+    } catch (err) {
+      console.error('Error refreshing feeds:', err);
+      alert('Failed to refresh feeds');
+    } finally {
+      if (btn) {
+        btn.classList.remove('refreshing');
+        btn.disabled = false;
+      }
+    }
+  }
+
+  async saveFeedItemToLibrary(itemId) {
+    const item = this.feedItems.find(i => i.id === itemId);
+    if (!item || item.is_saved) return;
+
+    try {
+      // Copy to saves table
+      const { error } = await this.supabase
+        .from('saves')
+        .insert({
+          user_id: this.user.id,
+          url: item.url,
+          title: item.title,
+          excerpt: item.excerpt,
+          content: item.content,
+          image_url: item.image_url,
+          author: item.author,
+          site_name: item.feeds?.title,
+          source: 'feed',
+        });
+
+      if (error) throw error;
+
+      // Mark as saved in feed_items
+      await this.supabase
+        .from('feed_items')
+        .update({ is_saved: true })
+        .eq('id', itemId);
+
+      item.is_saved = true;
+
+      // Update button UI
+      const btn = document.querySelector(`.feed-item-save-btn[data-item-id="${itemId}"]`);
+      if (btn) {
+        btn.classList.add('saved');
+        btn.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+          </svg>
+        `;
+      }
+    } catch (err) {
+      console.error('Error saving feed item:', err);
+      alert('Failed to save to library');
+    }
+  }
+
+  filterFeedsByCategory(categoryId) {
+    this.currentView = 'feeds';
+    this.currentFeedCategory = this.currentFeedCategory === categoryId ? null : categoryId;
+
+    // Update nav active states
+    document.querySelectorAll('.nav-item[data-view]').forEach(item => {
+      item.classList.toggle('active', item.dataset.view === 'feeds');
+    });
+    document.querySelectorAll('.feed-category-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.categoryId === this.currentFeedCategory);
+    });
+
+    const category = this.feedCategories.find(c => c.id === categoryId);
+    document.getElementById('view-title').textContent = this.currentFeedCategory && category
+      ? category.name
+      : 'Feed Inbox';
+
+    this.loadFeedItems();
+  }
+
+  async updateFeedUnreadBadge() {
+    const { count, error } = await this.supabase
+      .from('feed_items')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_seen', false);
+
+    const badge = document.getElementById('feed-unread-badge');
+    if (badge) {
+      if (count && count > 0) {
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+  }
+
+  // Add Feed Modal
+  showAddFeedModal() {
+    const modal = document.getElementById('add-feed-modal');
+    modal.classList.remove('hidden');
+    this.resetAddFeedModal();
+    this.renderCategoriesCheckboxes();
+    document.getElementById('feed-url-input').focus();
+  }
+
+  hideAddFeedModal() {
+    const modal = document.getElementById('add-feed-modal');
+    modal.classList.add('hidden');
+    this.resetAddFeedModal();
+  }
+
+  resetAddFeedModal() {
+    document.getElementById('feed-url-input').value = '';
+    document.getElementById('feed-subscribe-btn').disabled = true;
+    document.getElementById('feed-discovery-status').classList.add('hidden');
+    document.getElementById('feed-categories-picker').classList.add('hidden');
+    document.querySelector('.discovery-loading').classList.add('hidden');
+    document.querySelector('.discovery-success').classList.add('hidden');
+    document.querySelector('.discovery-error').classList.add('hidden');
+    this.discoveredFeed = null;
+  }
+
+  renderCategoriesCheckboxes() {
+    const container = document.getElementById('feed-categories-checkboxes');
+    container.innerHTML = this.feedCategories.map(cat => `
+      <label class="category-checkbox">
+        <input type="checkbox" value="${cat.id}">
+        <span>${this.escapeHtml(cat.name)}</span>
+      </label>
+    `).join('');
+  }
+
+  async discoverFeed(url) {
+    const statusEl = document.getElementById('feed-discovery-status');
+    const loadingEl = document.querySelector('.discovery-loading');
+    const successEl = document.querySelector('.discovery-success');
+    const errorEl = document.querySelector('.discovery-error');
+    const subscribeBtn = document.getElementById('feed-subscribe-btn');
+    const categoriesPickerEl = document.getElementById('feed-categories-picker');
+
+    statusEl.classList.remove('hidden');
+    loadingEl.classList.remove('hidden');
+    successEl.classList.add('hidden');
+    errorEl.classList.add('hidden');
+    subscribeBtn.disabled = true;
+    categoriesPickerEl.classList.add('hidden');
+    this.discoveredFeed = null;
+
+    try {
+      const response = await fetch(`${CONFIG.SUPABASE_URL}/functions/v1/fetch-feeds`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': CONFIG.SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          action: 'discover',
+          user_id: this.user.id,
+          url,
+        }),
+      });
+
+      const result = await response.json();
+
+      loadingEl.classList.add('hidden');
+
+      if (result.error) {
+        errorEl.classList.remove('hidden');
+        errorEl.querySelector('.error-text').textContent = result.error;
+      } else {
+        successEl.classList.remove('hidden');
+        document.getElementById('discovered-feed-title').textContent = result.title || 'Unknown Feed';
+        document.getElementById('discovered-feed-description').textContent = result.description || '';
+        document.getElementById('discovered-item-count').textContent = `${result.item_count} items`;
+
+        this.discoveredFeed = {
+          feed_url: result.feed_url,
+          title: result.title,
+          description: result.description,
+          site_url: result.site_url,
+        };
+
+        subscribeBtn.disabled = false;
+        categoriesPickerEl.classList.remove('hidden');
+      }
+    } catch (err) {
+      loadingEl.classList.add('hidden');
+      errorEl.classList.remove('hidden');
+      errorEl.querySelector('.error-text').textContent = 'Failed to discover feed';
+    }
+  }
+
+  async addCategoryInModal() {
+    const input = document.getElementById('new-category-input');
+    const name = input.value.trim();
+    if (!name) return;
+
+    try {
+      const { data, error } = await this.supabase
+        .from('feed_categories')
+        .insert({
+          user_id: this.user.id,
+          name,
+          sort_order: this.feedCategories.length,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        if (error.code === '23505') {
+          alert('Category already exists');
+        } else {
+          throw error;
+        }
+        return;
+      }
+
+      this.feedCategories.push(data);
+      this.renderCategoriesCheckboxes();
+      this.renderFeedCategoriesSidebar();
+      input.value = '';
+    } catch (err) {
+      console.error('Error adding category:', err);
+      alert('Failed to add category');
+    }
+  }
+
+  async subscribeFeed() {
+    if (!this.discoveredFeed) return;
+
+    const subscribeBtn = document.getElementById('feed-subscribe-btn');
+    subscribeBtn.disabled = true;
+    subscribeBtn.textContent = 'Subscribing...';
+
+    // Get selected category IDs
+    const categoryIds = Array.from(
+      document.querySelectorAll('#feed-categories-checkboxes input:checked')
+    ).map(cb => cb.value);
+
+    try {
+      const response = await fetch(`${CONFIG.SUPABASE_URL}/functions/v1/fetch-feeds`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': CONFIG.SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          action: 'subscribe',
+          user_id: this.user.id,
+          url: this.discoveredFeed.feed_url,
+          category_ids: categoryIds,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.error) {
+        alert('Error: ' + result.error);
+        subscribeBtn.disabled = false;
+        subscribeBtn.textContent = 'Subscribe';
+        return;
+      }
+
+      // Success - reload feeds and close modal
+      await this.loadFeeds();
+      await this.loadFeedCategories();
+      this.updateFeedUnreadBadge();
+      this.hideAddFeedModal();
+
+      // Switch to feeds view
+      this.setView('feeds');
+
+    } catch (err) {
+      console.error('Error subscribing:', err);
+      alert('Failed to subscribe to feed');
+      subscribeBtn.disabled = false;
+      subscribeBtn.textContent = 'Subscribe';
+    }
+  }
+
+  // Manage Feeds View
+  renderManageFeedsView() {
+    const container = document.getElementById('saves-container');
+    const empty = document.getElementById('empty-state');
+    const loading = document.getElementById('loading');
+
+    loading.classList.add('hidden');
+    empty.classList.add('hidden');
+
+    if (this.feeds.length === 0 && this.feedCategories.length === 0) {
+      container.innerHTML = `
+        <div class="feeds-empty-state">
+          <div class="feeds-empty-icon">📡</div>
+          <h3>No feeds yet</h3>
+          <p>Subscribe to RSS feeds to get started.</p>
+          <button class="btn primary" id="empty-add-feed-btn2">Add Your First Feed</button>
+        </div>
+      `;
+      document.getElementById('empty-add-feed-btn2')?.addEventListener('click', () => {
+        this.showAddFeedModal();
+      });
+      return;
+    }
+
+    const feedsTableHtml = this.feeds.length > 0 ? `
+      <div class="feeds-table">
+        <div class="feeds-table-header">
+          <div>Feed</div>
+          <div>Categories</div>
+          <div>Items</div>
+          <div>Actions</div>
+        </div>
+        ${this.feeds.map(feed => {
+          const categoryIds = (feed.feed_category_feeds || []).map(fcf => fcf.category_id);
+          const categories = this.feedCategories.filter(c => categoryIds.includes(c.id));
+          return `
+            <div class="feed-row" data-feed-id="${feed.id}">
+              <div class="feed-info">
+                <div class="feed-favicon" style="background: var(--bg-tertiary); display: flex; align-items: center; justify-content: center; font-size: 16px;">📰</div>
+                <div class="feed-details">
+                  <div class="feed-title">${this.escapeHtml(feed.title || 'Unknown Feed')}</div>
+                  <div class="feed-url">${this.escapeHtml(feed.feed_url)}</div>
+                </div>
+              </div>
+              <div class="feed-categories-tags">
+                ${categories.map(c => `<span class="feed-category-tag" style="background: ${c.color}20; color: ${c.color}">${this.escapeHtml(c.name)}</span>`).join('')}
+              </div>
+              <div class="feed-item-count">${feed.item_count || 0}</div>
+              <div class="feed-row-actions">
+                <button class="feed-row-btn refresh-feed-btn" data-feed-id="${feed.id}" title="Refresh">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                  </svg>
+                </button>
+                <button class="feed-row-btn danger unsubscribe-feed-btn" data-feed-id="${feed.id}" title="Unsubscribe">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    ` : '';
+
+    const categoriesHtml = `
+      <div class="categories-section">
+        <h3>Categories</h3>
+        <div class="categories-list">
+          ${this.feedCategories.map(cat => `
+            <div class="category-row" data-category-id="${cat.id}">
+              <span class="category-color-dot" style="background: ${cat.color}"></span>
+              <span class="category-name">${this.escapeHtml(cat.name)}</span>
+              <span class="category-feed-count">${this.feeds.filter(f => (f.feed_category_feeds || []).some(fcf => fcf.category_id === cat.id)).length} feeds</span>
+              <button class="category-delete-btn" data-category-id="${cat.id}" title="Delete category">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+          `).join('')}
+        </div>
+        <div class="add-category-form">
+          <input type="text" id="manage-new-category-input" placeholder="New category name">
+          <button class="btn secondary" id="manage-add-category-btn">Add Category</button>
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = `
+      <div class="manage-feeds-container">
+        <div class="manage-feeds-header">
+          <h2>Manage Feeds</h2>
+          <button class="btn primary" id="manage-add-feed-btn">Add Feed</button>
+        </div>
+        ${feedsTableHtml}
+        ${categoriesHtml}
+      </div>
+    `;
+
+    // Bind events
+    document.getElementById('manage-add-feed-btn')?.addEventListener('click', () => {
+      this.showAddFeedModal();
+    });
+
+    document.querySelectorAll('.refresh-feed-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const feedId = btn.dataset.feedId;
+        await this.refreshSingleFeed(feedId);
+      });
+    });
+
+    document.querySelectorAll('.unsubscribe-feed-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const feedId = btn.dataset.feedId;
+        await this.unsubscribeFeed(feedId);
+      });
+    });
+
+    document.querySelectorAll('.category-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const categoryId = btn.dataset.categoryId;
+        await this.deleteCategory(categoryId);
+      });
+    });
+
+    document.getElementById('manage-add-category-btn')?.addEventListener('click', () => {
+      this.addCategoryFromManageView();
+    });
+    document.getElementById('manage-new-category-input')?.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.addCategoryFromManageView();
+      }
+    });
+  }
+
+  async refreshSingleFeed(feedId) {
+    try {
+      const response = await fetch(`${CONFIG.SUPABASE_URL}/functions/v1/fetch-feeds`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': CONFIG.SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          action: 'fetch',
+          user_id: this.user.id,
+          feed_id: feedId,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.error) {
+        alert('Error refreshing feed: ' + result.error);
+      } else {
+        await this.loadFeeds();
+        this.updateFeedUnreadBadge();
+        this.renderManageFeedsView();
+      }
+    } catch (err) {
+      console.error('Error refreshing feed:', err);
+      alert('Failed to refresh feed');
+    }
+  }
+
+  async unsubscribeFeed(feedId) {
+    const feed = this.feeds.find(f => f.id === feedId);
+    if (!confirm(`Unsubscribe from "${feed?.title}"? This will also delete all items from this feed.`)) {
+      return;
+    }
+
+    try {
+      const { error } = await this.supabase
+        .from('feeds')
+        .delete()
+        .eq('id', feedId);
+
+      if (error) throw error;
+
+      await this.loadFeeds();
+      this.updateFeedUnreadBadge();
+      this.renderManageFeedsView();
+    } catch (err) {
+      console.error('Error unsubscribing:', err);
+      alert('Failed to unsubscribe');
+    }
+  }
+
+  async deleteCategory(categoryId) {
+    const category = this.feedCategories.find(c => c.id === categoryId);
+    if (!confirm(`Delete category "${category?.name}"? Feeds will not be deleted.`)) {
+      return;
+    }
+
+    try {
+      const { error } = await this.supabase
+        .from('feed_categories')
+        .delete()
+        .eq('id', categoryId);
+
+      if (error) throw error;
+
+      await this.loadFeedCategories();
+      this.renderManageFeedsView();
+    } catch (err) {
+      console.error('Error deleting category:', err);
+      alert('Failed to delete category');
+    }
+  }
+
+  async addCategoryFromManageView() {
+    const input = document.getElementById('manage-new-category-input');
+    const name = input.value.trim();
+    if (!name) return;
+
+    try {
+      const { data, error } = await this.supabase
+        .from('feed_categories')
+        .insert({
+          user_id: this.user.id,
+          name,
+          sort_order: this.feedCategories.length,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        if (error.code === '23505') {
+          alert('Category already exists');
+        } else {
+          throw error;
+        }
+        return;
+      }
+
+      this.feedCategories.push(data);
+      this.renderFeedCategoriesSidebar();
+      this.renderManageFeedsView();
+    } catch (err) {
+      console.error('Error adding category:', err);
+      alert('Failed to add category');
     }
   }
 }
