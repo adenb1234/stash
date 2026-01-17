@@ -314,6 +314,40 @@ class StashApp {
         this.addCategoryInModal();
       }
     });
+
+    // Global keyboard shortcuts for feeds
+    document.addEventListener('keydown', (e) => {
+      // Don't trigger if typing in an input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      // Esc to go back from feed reader
+      if (e.key === 'Escape' && this.currentView === 'feed-reader') {
+        e.preventDefault();
+        this.currentFeedItem = null;
+        this.setView('feeds');
+        return;
+      }
+
+      // Feed inbox keyboard shortcuts (only when hovering an item)
+      if (this.currentView === 'feeds' && this.hoveredFeedItemId) {
+        const item = this.feedItems.find(i => i.id === this.hoveredFeedItemId);
+        if (!item) return;
+
+        // 'e' to mark as seen
+        if (e.key === 'e' || e.key === 'E') {
+          e.preventDefault();
+          this.markFeedItemSeen(item);
+          return;
+        }
+
+        // 'o' to open
+        if (e.key === 'o' || e.key === 'O') {
+          e.preventDefault();
+          this.openFeedItem(item);
+          return;
+        }
+      }
+    });
   }
 
   showAuthScreen() {
@@ -1964,26 +1998,12 @@ class StashApp {
 
     empty.classList.add('hidden');
 
-    // Gmail-style compact row layout
+    // Simplified row layout: title, source, date
     const itemsHtml = this.feedItems.map(item => `
       <div class="feed-item-row${!item.is_seen ? ' unseen' : ''}" data-id="${item.id}">
-        <div class="feed-item-source-icon">📰</div>
-        <div class="feed-item-main">
-          <span class="feed-item-title">${this.escapeHtml(item.title || 'Untitled')}</span>
-          <span class="feed-item-separator">—</span>
-          <span class="feed-item-excerpt">${this.escapeHtml(item.excerpt || '')}</span>
-        </div>
-        <div class="feed-item-meta">
-          <span class="feed-item-source">${this.escapeHtml(item.feeds?.title || '')}</span>
-          <span class="feed-item-time">${item.published_at ? this.formatRelativeDate(item.published_at) : ''}</span>
-        </div>
-        <div class="feed-item-actions">
-          <button class="feed-item-save-btn${item.is_saved ? ' saved' : ''}" data-item-id="${item.id}" title="${item.is_saved ? 'Saved to library' : 'Save to library'}">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="${item.is_saved ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
-              <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
-            </svg>
-          </button>
-        </div>
+        <span class="feed-item-title">${this.escapeHtml(item.title || 'Untitled')}</span>
+        <span class="feed-item-source">${this.escapeHtml(item.feeds?.title || '')}</span>
+        <span class="feed-item-time">${item.published_at ? this.formatRelativeDate(item.published_at) : ''}</span>
       </div>
     `).join('');
 
@@ -2013,26 +2033,27 @@ class StashApp {
   }
 
   bindFeedItemEvents() {
-    // Click to open item
-    document.querySelectorAll('.feed-item-row').forEach(row => {
-      row.addEventListener('click', (e) => {
-        // Don't open if clicking save button
-        if (e.target.closest('.feed-item-save-btn')) return;
+    // Track hovered item for keyboard shortcuts
+    this.hoveredFeedItemId = null;
 
+    document.querySelectorAll('.feed-item-row').forEach(row => {
+      // Click to open item
+      row.addEventListener('click', () => {
         const id = row.dataset.id;
         const item = this.feedItems.find(i => i.id === id);
         if (item) {
           this.openFeedItem(item);
         }
       });
-    });
 
-    // Save button
-    document.querySelectorAll('.feed-item-save-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const itemId = btn.dataset.itemId;
-        await this.saveFeedItemToLibrary(itemId);
+      // Track hover for keyboard shortcuts
+      row.addEventListener('mouseenter', () => {
+        this.hoveredFeedItemId = row.dataset.id;
+        row.classList.add('hovered');
+      });
+      row.addEventListener('mouseleave', () => {
+        this.hoveredFeedItemId = null;
+        row.classList.remove('hovered');
       });
     });
   }
@@ -2072,6 +2093,34 @@ class StashApp {
 
     // Open full-page reader view
     this.setView('feed-reader');
+  }
+
+  async markFeedItemSeen(item) {
+    if (item.is_seen) return;
+
+    await this.supabase
+      .from('feed_items')
+      .update({ is_seen: true })
+      .eq('id', item.id);
+
+    item.is_seen = true;
+    this.updateFeedUnreadBadge();
+
+    // Remove the row from the list with animation
+    const row = document.querySelector(`.feed-item-row[data-id="${item.id}"]`);
+    if (row) {
+      row.classList.add('marking-seen');
+      setTimeout(() => {
+        // Remove from feedItems array if viewing unseen
+        if (this.feedViewTab === 'unseen') {
+          this.feedItems = this.feedItems.filter(i => i.id !== item.id);
+          row.remove();
+        } else {
+          row.classList.remove('unseen');
+          row.classList.remove('marking-seen');
+        }
+      }, 200);
+    }
   }
 
   renderFeedReaderView() {
