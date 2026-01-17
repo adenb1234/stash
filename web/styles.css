@@ -580,7 +580,17 @@ input, select {
 
 .save-card-tags {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.save-card-tag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 
 /* Loading & Empty States */

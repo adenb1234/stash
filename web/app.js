@@ -360,7 +360,7 @@ class StashApp {
 
     let query = this.supabase
       .from('saves')
-      .select('*')
+      .select('*, save_tags(tags(id, name, color))')
       .order(column, { ascending: direction === 'asc' });
 
     // Apply view filters
@@ -408,12 +408,32 @@ class StashApp {
     }
   }
 
+  // Helper to extract tags from nested save_tags structure
+  getTagsForSave(save) {
+    if (!save.save_tags || !Array.isArray(save.save_tags)) return [];
+    return save.save_tags
+      .map(st => st.tags)
+      .filter(t => t != null);
+  }
+
+  // Render tags HTML for a save
+  renderTagsHtml(save) {
+    const tags = this.getTagsForSave(save);
+    if (tags.length === 0) return '';
+    return `
+      <div class="save-card-tags">
+        ${tags.map(tag => `<span class="save-card-tag" style="background: ${tag.color || '#6366f1'}20; color: ${tag.color || '#6366f1'}">${this.escapeHtml(tag.name)}</span>`).join('')}
+      </div>
+    `;
+  }
+
   renderSaves() {
     const container = document.getElementById('saves-container');
 
     container.innerHTML = this.saves.map(save => {
       const isHighlight = !!save.highlight;
       const date = new Date(save.created_at).toLocaleDateString();
+      const tagsHtml = this.renderTagsHtml(save);
 
       if (isHighlight) {
         return `
@@ -422,6 +442,7 @@ class StashApp {
               <div class="save-card-site">${this.escapeHtml(save.site_name || '')}</div>
               <div class="save-card-highlight">"${this.escapeHtml(save.highlight)}"</div>
               ${save.note ? `<div class="save-card-note">${this.escapeHtml(save.note)}</div>` : ''}
+              ${tagsHtml}
               <div class="save-card-title">${this.escapeHtml(save.title || 'Untitled')}</div>
               <div class="save-card-meta">
                 <span class="save-card-date">${date}</span>
@@ -438,6 +459,7 @@ class StashApp {
             <div class="save-card-site">${this.escapeHtml(save.site_name || '')}</div>
             <div class="save-card-title">${this.escapeHtml(save.title || 'Untitled')}</div>
             <div class="save-card-excerpt">${this.escapeHtml(save.excerpt || '')}</div>
+            ${tagsHtml}
             <div class="save-card-meta">
               <span class="save-card-date">${date}</span>
             </div>
@@ -574,6 +596,7 @@ class StashApp {
   renderSaveCard(save) {
     const isHighlight = !!save.highlight;
     const date = new Date(save.created_at).toLocaleDateString();
+    const tagsHtml = this.renderTagsHtml(save);
 
     if (isHighlight) {
       return `
@@ -582,6 +605,7 @@ class StashApp {
             <div class="save-card-site">${this.escapeHtml(save.site_name || '')}</div>
             <div class="save-card-highlight">"${this.escapeHtml(save.highlight)}"</div>
             ${save.note ? `<div class="save-card-note">${this.escapeHtml(save.note)}</div>` : ''}
+            ${tagsHtml}
             <div class="save-card-title">${this.escapeHtml(save.title || 'Untitled')}</div>
             <div class="save-card-meta">
               <span class="save-card-date">${date}</span>
@@ -598,6 +622,7 @@ class StashApp {
           <div class="save-card-site">${this.escapeHtml(save.site_name || '')}</div>
           <div class="save-card-title">${this.escapeHtml(save.title || 'Untitled')}</div>
           <div class="save-card-excerpt">${this.escapeHtml(save.excerpt || '')}</div>
+          ${tagsHtml}
           <div class="save-card-meta">
             <span class="save-card-date">${date}</span>
           </div>
@@ -682,7 +707,7 @@ class StashApp {
 
       const { data, error } = await this.supabase
         .from('saves')
-        .select('*')
+        .select('*, save_tags(tags(id, name, color))')
         .in('id', saveIds)
         .eq('is_archived', false)
         .order(column, { ascending: direction === 'asc' });

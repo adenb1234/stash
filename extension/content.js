@@ -23,12 +23,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === 'getSelection') {
     const selection = window.getSelection().toString().trim();
     sendResponse({ selection });
+    return false;
   } else if (request.action === 'showToast') {
     showToast(request.message, request.isError);
+    sendResponse({ success: true });
+    return false;
   } else if (request.action === 'showTagSelector') {
     showTagSelector(request.saveId, request.tags, request.highlightText);
+    sendResponse({ success: true });
+    return false;
   }
-  return true;
+  return false;
 });
 
 async function extractArticle() {

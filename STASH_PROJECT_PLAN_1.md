@@ -49,35 +49,39 @@ The schema already has a solid foundation:
 
 ## Project Phases
 
-### Phase 1: Fork & Setup (Verify it works)
+### Phase 1: Fork & Setup ✅ COMPLETE
 
 **Goal:** Get a working local/deployed instance of Stash
 
-**Tasks:**
-1. Fork `kbroose/stash` to my GitHub
-2. Create a free Supabase project at supabase.com
-3. Run the database schema from `supabase/schema.sql`
-4. Configure credentials in `extension/config.js` and `web/config.js`
-5. Load the Chrome extension locally (`chrome://extensions` → Load unpacked)
-6. Deploy the web app to Vercel or Netlify (free tier)
-7. Test the full flow:
-   - Save an article from Chrome extension
-   - Highlight text and save
-   - Add tags to a save
-   - Create folders and organize
-   - Search across saves
-   - Verify everything appears in web app
+**Completed:**
+1. ✅ Forked `kbroose/stash` to adenb1234/stash
+2. ✅ Created Supabase project (evpruqiugexseqzdokir)
+3. ✅ Ran database schema + added custom RLS policies for single-user mode
+4. ✅ Configured credentials in extension and web config files
+5. ✅ Chrome extension loaded and working
+6. ✅ Web app deployed to Vercel: https://stash-hazel.vercel.app
+7. ✅ Full flow tested and working
 
-**Key files to examine:**
-- `supabase/schema.sql` - database structure (attached below for reference)
+**Enhancements added beyond base Stash:**
+- ✅ Tag selector modal appears after saving highlights
+- ✅ Multi-tag support (can select multiple tags per highlight)
+- ✅ Notes field added to highlights (user annotations)
+- ✅ Tags displayed on save cards in web app
+- ✅ Notes displayed on save cards and reading pane
+
+**Database additions:**
+- `saves.note` column for user annotations on highlights
+
+**Key files:**
+- `supabase/schema.sql` - database structure
 - `extension/config.js` - extension configuration
-- `web/config.js` - web app configuration  
+- `web/config.js` - web app configuration
 - `SETUP.md` - detailed setup instructions
 
 **Tech stack:**
 - Frontend: Vanilla JS, HTML, CSS (no frameworks)
 - Backend: Supabase (PostgreSQL + REST API)
-- Hosting: Any static host
+- Hosting: Vercel (auto-deploys from main branch)
 
 ---
 

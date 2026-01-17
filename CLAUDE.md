@@ -66,13 +66,28 @@ Already in config files:
 
 RLS policies bypass `auth.uid()` using this hardcoded USER_ID.
 
-## Current WIP
+## Current State
 
-**Tag selector modal not appearing on highlight save:**
-- `background.js:saveHighlight()` sends `showTagSelector` message after insert
-- `content.js:showTagSelector()` should render modal
-- Debug: check if message is received, if content script is injected
+**Phase 1 COMPLETE** — All core features working:
+- Chrome extension saves articles and highlights
+- Tag selector modal appears after saving highlights (with multi-tag support)
+- Notes can be added to highlights via the tag selector modal
+- Web app displays saves with tags and notes on cards
+- Folder/tag filtering, search, favorites, archive all working
+- Kindle import working
+- PWA installable
 
-## Phase 2 (Future)
+**Database note:** The `saves` table has a `note` column for user annotations on highlights.
 
-RSS feed support — extend `saves` table with `feed_id`, `guid`, `is_read` rather than separate table. Lets feed items use existing tags/folders/search infrastructure.
+## Phase 2: RSS Feeds (Next)
+
+Add RSS/Atom feed subscriptions to replace Reader.io completely.
+
+**Design decision:** Feed items extend the `saves` table (add `feed_id`, `guid`, `is_read`) rather than being separate. This lets feed items use existing tags/folders/search.
+
+**Implementation plan (see STASH_PROJECT_PLAN_1.md for full details):**
+1. Add `feeds` table for subscriptions
+2. Extend `saves` table with feed columns
+3. Build feed fetching (client-side MVP first)
+4. Add feed management UI + reader view
+5. OPML import/export
