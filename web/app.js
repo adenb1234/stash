@@ -5,6 +5,8 @@ class StashApp {
     this.user = { id: CONFIG.USER_ID }; // Hardcoded single user
     this.currentView = 'all';
     this.currentSave = null;
+    this.currentFolder = null;
+    this.currentTag = null;
     this.saves = [];
     this.tags = [];
     this.folders = [];
@@ -377,6 +379,11 @@ class StashApp {
       query = query.eq('is_archived', false);
     }
 
+    // Apply folder filter
+    if (this.currentFolder) {
+      query = query.eq('folder_id', this.currentFolder);
+    }
+
     const { data, error } = await query;
 
     loading.classList.add('hidden');
@@ -619,13 +626,91 @@ class StashApp {
   renderTags() {
     const container = document.getElementById('tags-list');
     container.innerHTML = this.tags.map(tag => `
-      <span class="tag" data-id="${tag.id}">${this.escapeHtml(tag.name)}</span>
+      <span class="tag${this.currentTag === tag.id ? ' active' : ''}" data-id="${tag.id}">${this.escapeHtml(tag.name)}</span>
     `).join('');
 
     container.querySelectorAll('.tag').forEach(el => {
       el.addEventListener('click', () => {
-        // TODO: Filter by tag
+        const tagId = el.dataset.id;
+        this.filterByTag(tagId);
       });
+    });
+  }
+
+  async filterByTag(tagId) {
+    // Clear other filters
+    this.currentFolder = null;
+    this.currentView = 'all';
+
+    // Toggle tag filter (click again to clear)
+    if (this.currentTag === tagId) {
+      this.currentTag = null;
+      document.getElementById('view-title').textContent = 'All Saves';
+      this.loadSaves();
+    } else {
+      this.currentTag = tagId;
+      const tag = this.tags.find(t => t.id === tagId);
+      document.getElementById('view-title').textContent = tag ? `#${tag.name}` : 'Tag';
+
+      // Load saves with this tag
+      const container = document.getElementById('saves-container');
+      const loading = document.getElementById('loading');
+      const empty = document.getElementById('empty-state');
+
+      loading.classList.remove('hidden');
+      container.innerHTML = '';
+
+      // Get save IDs that have this tag
+      const { data: saveTagData } = await this.supabase
+        .from('save_tags')
+        .select('save_id')
+        .eq('tag_id', tagId);
+
+      if (!saveTagData || saveTagData.length === 0) {
+        loading.classList.add('hidden');
+        empty.classList.remove('hidden');
+        this.saves = [];
+        return;
+      }
+
+      const saveIds = saveTagData.map(st => st.save_id);
+
+      const sortValue = document.getElementById('sort-select').value;
+      const [column, direction] = sortValue.split('.');
+
+      const { data, error } = await this.supabase
+        .from('saves')
+        .select('*')
+        .in('id', saveIds)
+        .eq('is_archived', false)
+        .order(column, { ascending: direction === 'asc' });
+
+      loading.classList.add('hidden');
+
+      if (error) {
+        console.error('Error loading saves by tag:', error);
+        return;
+      }
+
+      this.saves = data || [];
+
+      if (this.saves.length === 0) {
+        empty.classList.remove('hidden');
+      } else {
+        empty.classList.add('hidden');
+        this.renderSaves();
+      }
+    }
+
+    // Update nav active states
+    document.querySelectorAll('.nav-item[data-view]').forEach(item => {
+      item.classList.toggle('active', !this.currentTag && item.dataset.view === 'all');
+    });
+    document.querySelectorAll('.nav-item[data-folder]').forEach(item => {
+      item.classList.remove('active');
+    });
+    document.querySelectorAll('.tag').forEach(item => {
+      item.classList.toggle('active', item.dataset.id === this.currentTag);
     });
   }
 
@@ -642,19 +727,64 @@ class StashApp {
   renderFolders() {
     const container = document.getElementById('folders-list');
     container.innerHTML = this.folders.map(folder => `
-      <a href="#" class="nav-item" data-folder="${folder.id}">
+      <a href="#" class="nav-item${this.currentFolder === folder.id ? ' active' : ''}" data-folder="${folder.id}">
         <span style="color: ${folder.color}">📁</span>
         ${this.escapeHtml(folder.name)}
       </a>
     `).join('');
+
+    container.querySelectorAll('.nav-item[data-folder]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        const folderId = el.dataset.folder;
+        this.filterByFolder(folderId);
+      });
+    });
+  }
+
+  filterByFolder(folderId) {
+    // Clear other filters
+    this.currentTag = null;
+    this.currentView = 'all';
+
+    // Toggle folder filter (click again to clear)
+    if (this.currentFolder === folderId) {
+      this.currentFolder = null;
+      document.getElementById('view-title').textContent = 'All Saves';
+    } else {
+      this.currentFolder = folderId;
+      const folder = this.folders.find(f => f.id === folderId);
+      document.getElementById('view-title').textContent = folder ? folder.name : 'Folder';
+    }
+
+    // Update nav active states
+    document.querySelectorAll('.nav-item[data-view]').forEach(item => {
+      item.classList.toggle('active', !this.currentFolder && item.dataset.view === 'all');
+    });
+    document.querySelectorAll('.nav-item[data-folder]').forEach(item => {
+      item.classList.toggle('active', item.dataset.folder === this.currentFolder);
+    });
+    document.querySelectorAll('.tag').forEach(item => {
+      item.classList.remove('active');
+    });
+
+    this.loadSaves();
   }
 
   setView(view) {
     this.currentView = view;
+    this.currentFolder = null;
+    this.currentTag = null;
 
     // Update nav
     document.querySelectorAll('.nav-item[data-view]').forEach(item => {
       item.classList.toggle('active', item.dataset.view === view);
+    });
+    document.querySelectorAll('.nav-item[data-folder]').forEach(item => {
+      item.classList.remove('active');
+    });
+    document.querySelectorAll('.tag').forEach(item => {
+      item.classList.remove('active');
     });
 
     // Update title
