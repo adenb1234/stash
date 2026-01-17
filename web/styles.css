@@ -2266,13 +2266,23 @@ input, select {
 }
 
 .feed-item-row:hover,
-.feed-item-row.hovered {
+.feed-item-row.selected {
   background: var(--bg-secondary);
 }
 
+.feed-item-row.selected {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  background: rgba(99, 102, 241, 0.08);
+}
+
 [data-theme="dark"] .feed-item-row:hover,
-[data-theme="dark"] .feed-item-row.hovered {
+[data-theme="dark"] .feed-item-row.selected {
   background: var(--bg-tertiary);
+}
+
+[data-theme="dark"] .feed-item-row.selected {
+  background: rgba(99, 102, 241, 0.15);
 }
 
 .feed-item-row.unseen {

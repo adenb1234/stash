@@ -320,34 +320,79 @@ class StashApp {
       // Don't trigger if typing in an input
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-      // Esc to go back from feed reader
-      if (e.key === 'Escape' && this.currentView === 'feed-reader') {
-        e.preventDefault();
-        this.currentFeedItem = null;
-        this.setView('feeds');
-        return;
+      // Feed reader shortcuts
+      if (this.currentView === 'feed-reader') {
+        // Esc to go back
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          this.currentFeedItem = null;
+          this.setView('feeds');
+          return;
+        }
+        // 'o' to open original URL
+        if (e.key === 'o' || e.key === 'O') {
+          e.preventDefault();
+          if (this.currentFeedItem?.url) {
+            window.open(this.currentFeedItem.url, '_blank');
+          }
+          return;
+        }
       }
 
-      // Feed inbox keyboard shortcuts (only when hovering an item)
-      if (this.currentView === 'feeds' && this.hoveredFeedItemId) {
-        const item = this.feedItems.find(i => i.id === this.hoveredFeedItemId);
-        if (!item) return;
-
-        // 'e' to mark as seen
-        if (e.key === 'e' || e.key === 'E') {
+      // Feed inbox keyboard shortcuts
+      if (this.currentView === 'feeds' && this.feedItems.length > 0) {
+        // Arrow keys to navigate
+        if (e.key === 'ArrowDown' || e.key === 'j') {
           e.preventDefault();
-          this.markFeedItemSeen(item);
+          this.selectFeedItem((this.selectedFeedIndex ?? -1) + 1);
+          return;
+        }
+        if (e.key === 'ArrowUp' || e.key === 'k') {
+          e.preventDefault();
+          this.selectFeedItem((this.selectedFeedIndex ?? 1) - 1);
           return;
         }
 
-        // 'o' to open
-        if (e.key === 'o' || e.key === 'O') {
-          e.preventDefault();
-          this.openFeedItem(item);
-          return;
+        // Actions on selected item
+        if (this.selectedFeedIndex !== null && this.selectedFeedIndex >= 0) {
+          const item = this.feedItems[this.selectedFeedIndex];
+          if (!item) return;
+
+          // 'e' to mark as seen
+          if (e.key === 'e' || e.key === 'E') {
+            e.preventDefault();
+            this.markFeedItemSeen(item);
+            return;
+          }
+
+          // 'o' or Enter to open
+          if (e.key === 'o' || e.key === 'O' || e.key === 'Enter') {
+            e.preventDefault();
+            this.openFeedItem(item);
+            return;
+          }
         }
       }
     });
+  }
+
+  selectFeedItem(index) {
+    // Clamp index to valid range
+    if (index < 0) index = 0;
+    if (index >= this.feedItems.length) index = this.feedItems.length - 1;
+
+    this.selectedFeedIndex = index;
+
+    // Update visual selection
+    document.querySelectorAll('.feed-item-row').forEach((row, i) => {
+      row.classList.toggle('selected', i === index);
+    });
+
+    // Scroll into view if needed
+    const selectedRow = document.querySelector('.feed-item-row.selected');
+    if (selectedRow) {
+      selectedRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
   }
 
   showAuthScreen() {
@@ -2033,27 +2078,21 @@ class StashApp {
   }
 
   bindFeedItemEvents() {
-    // Track hovered item for keyboard shortcuts
-    this.hoveredFeedItemId = null;
+    // Reset selection
+    this.selectedFeedIndex = null;
 
-    document.querySelectorAll('.feed-item-row').forEach(row => {
+    document.querySelectorAll('.feed-item-row').forEach((row, index) => {
       // Click to open item
       row.addEventListener('click', () => {
-        const id = row.dataset.id;
-        const item = this.feedItems.find(i => i.id === id);
+        const item = this.feedItems[index];
         if (item) {
           this.openFeedItem(item);
         }
       });
 
-      // Track hover for keyboard shortcuts
+      // Mouse hover selects the item
       row.addEventListener('mouseenter', () => {
-        this.hoveredFeedItemId = row.dataset.id;
-        row.classList.add('hovered');
-      });
-      row.addEventListener('mouseleave', () => {
-        this.hoveredFeedItemId = null;
-        row.classList.remove('hovered');
+        this.selectFeedItem(index);
       });
     });
   }
@@ -2098,6 +2137,8 @@ class StashApp {
   async markFeedItemSeen(item) {
     if (item.is_seen) return;
 
+    const currentIndex = this.selectedFeedIndex;
+
     await this.supabase
       .from('feed_items')
       .update({ is_seen: true })
@@ -2115,6 +2156,12 @@ class StashApp {
         if (this.feedViewTab === 'unseen') {
           this.feedItems = this.feedItems.filter(i => i.id !== item.id);
           row.remove();
+          // Keep selection at same index (now next item) or clamp if at end
+          if (this.feedItems.length > 0 && currentIndex !== null) {
+            this.selectFeedItem(Math.min(currentIndex, this.feedItems.length - 1));
+          } else {
+            this.selectedFeedIndex = null;
+          }
         } else {
           row.classList.remove('unseen');
           row.classList.remove('marking-seen');
