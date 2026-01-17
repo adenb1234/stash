@@ -484,6 +484,9 @@ class StashApp {
   renderSaves() {
     const container = document.getElementById('saves-container');
 
+    // Restore grid class for saves layout
+    container.classList.add('saves-grid');
+
     container.innerHTML = this.saves.map(save => {
       const isHighlight = !!save.highlight;
       const date = new Date(save.created_at).toLocaleDateString();
@@ -1894,6 +1897,9 @@ class StashApp {
     const container = document.getElementById('saves-container');
     const empty = document.getElementById('empty-state');
 
+    // Remove grid class for full-width feed layout
+    container.classList.remove('saves-grid');
+
     if (this.feeds.length === 0) {
       container.innerHTML = `
         <div class="feeds-empty-state">
@@ -2406,6 +2412,9 @@ class StashApp {
     const container = document.getElementById('saves-container');
     const empty = document.getElementById('empty-state');
     const loading = document.getElementById('loading');
+
+    // Remove grid class for full-width layout
+    container.classList.remove('saves-grid');
 
     loading.classList.add('hidden');
     empty.classList.add('hidden');
