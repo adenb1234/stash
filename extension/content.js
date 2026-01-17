@@ -15,6 +15,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === 'getSelection') {
     const selection = window.getSelection().toString().trim();
     sendResponse({ selection });
+  } else if (request.action === 'showToast') {
+    showToast(request.message, request.isError);
+  } else if (request.action === 'showTagSelector') {
+    showTagSelector(request.saveId, request.tags, request.highlightText);
   }
   return true;
 });
@@ -323,15 +327,6 @@ function showToast(message, isError = false) {
     setTimeout(() => toast.remove(), 300);
   }, 2000);
 }
-
-// Listen for save confirmations and tag selector
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'showToast') {
-    showToast(request.message, request.isError);
-  } else if (request.action === 'showTagSelector') {
-    showTagSelector(request.saveId, request.tags, request.highlightText);
-  }
-});
 
 // Tag Selector Modal
 function showTagSelector(saveId, tags, highlightText) {
