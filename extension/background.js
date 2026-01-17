@@ -51,7 +51,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 // Save highlighted text
 async function saveHighlight(tab, selectionText) {
   try {
-    await supabase.insert('saves', {
+    const result = await supabase.insert('saves', {
       user_id: CONFIG.USER_ID,
       url: tab.url,
       title: tab.title,
@@ -60,9 +60,18 @@ async function saveHighlight(tab, selectionText) {
       source: 'extension',
     });
 
+    // Get the saved highlight ID
+    const saveId = result[0]?.id;
+
+    // Fetch existing tags for the selector
+    const tags = await supabase.select('tags', { order: 'name.asc' });
+
+    // Show tag selector
     chrome.tabs.sendMessage(tab.id, {
-      action: 'showToast',
-      message: 'Highlight saved!',
+      action: 'showTagSelector',
+      saveId: saveId,
+      tags: tags || [],
+      highlightText: selectionText,
     });
   } catch (err) {
     console.error('Save highlight failed:', err);
@@ -185,6 +194,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           limit: 10,
         });
         sendResponse({ success: true, saves });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'createTag') {
+    (async () => {
+      if (!supabase) await initSupabase();
+      try {
+        const result = await supabase.insert('tags', {
+          user_id: CONFIG.USER_ID,
+          name: request.tagName,
+        });
+        sendResponse({ success: true, tag: result[0] });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'addTagToSave') {
+    (async () => {
+      if (!supabase) await initSupabase();
+      try {
+        await supabase.insert('save_tags', {
+          save_id: request.saveId,
+          tag_id: request.tagId,
+        });
+        sendResponse({ success: true });
       } catch (err) {
         sendResponse({ success: false, error: err.message });
       }

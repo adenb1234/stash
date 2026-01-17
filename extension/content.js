@@ -324,9 +324,372 @@ function showToast(message, isError = false) {
   }, 2000);
 }
 
-// Listen for save confirmations
+// Listen for save confirmations and tag selector
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'showToast') {
     showToast(request.message, request.isError);
+  } else if (request.action === 'showTagSelector') {
+    showTagSelector(request.saveId, request.tags, request.highlightText);
   }
 });
+
+// Tag Selector Modal
+function showTagSelector(saveId, tags, highlightText) {
+  // Remove any existing selector
+  const existing = document.getElementById('stash-tag-selector');
+  if (existing) existing.remove();
+
+  // Create modal
+  const modal = document.createElement('div');
+  modal.id = 'stash-tag-selector';
+  modal.innerHTML = `
+    <div class="stash-modal-overlay"></div>
+    <div class="stash-modal-content">
+      <div class="stash-modal-header">
+        <h3>Tag this highlight</h3>
+        <button class="stash-close-btn">&times;</button>
+      </div>
+      <div class="stash-highlight-preview">"${highlightText.substring(0, 100)}${highlightText.length > 100 ? '...' : ''}"</div>
+      <div class="stash-search-container">
+        <input type="text" class="stash-tag-search" placeholder="Search or create tag...">
+      </div>
+      <div class="stash-tags-list">
+        ${tags.map(tag => `
+          <div class="stash-tag-item" data-id="${tag.id}" data-name="${tag.name}">
+            <span class="stash-tag-name">${tag.name}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div class="stash-create-tag" style="display: none;">
+        <button class="stash-create-btn">Create "<span class="stash-new-tag-name"></span>"</button>
+      </div>
+      <div class="stash-modal-footer">
+        <button class="stash-skip-btn">Skip</button>
+        <button class="stash-done-btn" disabled>Done</button>
+      </div>
+    </div>
+  `;
+
+  // Add styles
+  const style = document.createElement('style');
+  style.id = 'stash-tag-selector-styles';
+  style.textContent = `
+    #stash-tag-selector {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 999999;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    #stash-tag-selector * {
+      box-sizing: border-box;
+    }
+    .stash-modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+    }
+    .stash-modal-content {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      border-radius: 12px;
+      width: 360px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+      animation: stashModalIn 0.2s ease;
+    }
+    @keyframes stashModalIn {
+      from { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
+      to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    }
+    .stash-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid #eee;
+    }
+    .stash-modal-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #111;
+    }
+    .stash-close-btn {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #666;
+      padding: 0;
+      line-height: 1;
+    }
+    .stash-close-btn:hover {
+      color: #111;
+    }
+    .stash-highlight-preview {
+      padding: 12px 20px;
+      background: #f9fafb;
+      font-size: 13px;
+      color: #666;
+      font-style: italic;
+      border-bottom: 1px solid #eee;
+    }
+    .stash-search-container {
+      padding: 12px 20px;
+    }
+    .stash-tag-search {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+    }
+    .stash-tag-search:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    }
+    .stash-tags-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 12px;
+      max-height: 200px;
+    }
+    .stash-tag-item {
+      display: flex;
+      align-items: center;
+      padding: 10px 12px;
+      margin: 4px 0;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .stash-tag-item:hover {
+      background: #f3f4f6;
+    }
+    .stash-tag-item.selected {
+      background: #6366f1;
+      color: white;
+    }
+    .stash-tag-name {
+      font-size: 14px;
+    }
+    .stash-create-tag {
+      padding: 8px 20px;
+    }
+    .stash-create-btn {
+      width: 100%;
+      padding: 10px;
+      background: #f3f4f6;
+      border: 1px dashed #ccc;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      color: #666;
+    }
+    .stash-create-btn:hover {
+      background: #e5e7eb;
+    }
+    .stash-modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 16px 20px;
+      border-top: 1px solid #eee;
+    }
+    .stash-skip-btn, .stash-done-btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .stash-skip-btn {
+      background: none;
+      border: 1px solid #ddd;
+      color: #666;
+    }
+    .stash-skip-btn:hover {
+      background: #f3f4f6;
+    }
+    .stash-done-btn {
+      background: #6366f1;
+      border: none;
+      color: white;
+    }
+    .stash-done-btn:hover:not(:disabled) {
+      background: #5558e3;
+    }
+    .stash-done-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .stash-tag-item.hidden {
+      display: none;
+    }
+  `;
+
+  document.head.appendChild(style);
+  document.body.appendChild(modal);
+
+  // State
+  let selectedTags = [];
+  let allTags = [...tags];
+
+  // Elements
+  const searchInput = modal.querySelector('.stash-tag-search');
+  const tagsList = modal.querySelector('.stash-tags-list');
+  const createTagDiv = modal.querySelector('.stash-create-tag');
+  const createBtn = modal.querySelector('.stash-create-btn');
+  const newTagNameSpan = modal.querySelector('.stash-new-tag-name');
+  const doneBtn = modal.querySelector('.stash-done-btn');
+  const skipBtn = modal.querySelector('.stash-skip-btn');
+  const closeBtn = modal.querySelector('.stash-close-btn');
+  const overlay = modal.querySelector('.stash-modal-overlay');
+
+  // Close modal
+  function closeModal() {
+    modal.style.animation = 'stashModalIn 0.15s ease reverse';
+    setTimeout(() => {
+      modal.remove();
+      style.remove();
+    }, 150);
+  }
+
+  // Update done button state
+  function updateDoneButton() {
+    doneBtn.disabled = selectedTags.length === 0;
+  }
+
+  // Handle tag click
+  tagsList.addEventListener('click', (e) => {
+    const tagItem = e.target.closest('.stash-tag-item');
+    if (!tagItem) return;
+
+    const tagId = tagItem.dataset.id;
+    const tagName = tagItem.dataset.name;
+
+    if (tagItem.classList.contains('selected')) {
+      tagItem.classList.remove('selected');
+      selectedTags = selectedTags.filter(t => t.id !== tagId);
+    } else {
+      tagItem.classList.add('selected');
+      selectedTags.push({ id: tagId, name: tagName });
+    }
+    updateDoneButton();
+  });
+
+  // Search/filter tags
+  searchInput.addEventListener('input', (e) => {
+    const query = e.target.value.toLowerCase().trim();
+
+    // Filter existing tags
+    let hasMatch = false;
+    tagsList.querySelectorAll('.stash-tag-item').forEach(item => {
+      const name = item.dataset.name.toLowerCase();
+      if (name.includes(query) || !query) {
+        item.classList.remove('hidden');
+        if (name === query) hasMatch = true;
+      } else {
+        item.classList.add('hidden');
+      }
+    });
+
+    // Show create button if no exact match and query exists
+    if (query && !hasMatch) {
+      createTagDiv.style.display = 'block';
+      newTagNameSpan.textContent = e.target.value;
+    } else {
+      createTagDiv.style.display = 'none';
+    }
+  });
+
+  // Create new tag
+  createBtn.addEventListener('click', async () => {
+    const tagName = searchInput.value.trim();
+    if (!tagName) return;
+
+    createBtn.textContent = 'Creating...';
+    createBtn.disabled = true;
+
+    chrome.runtime.sendMessage({ action: 'createTag', tagName }, (response) => {
+      if (response.success && response.tag) {
+        // Add to list
+        const newTag = response.tag;
+        allTags.push(newTag);
+
+        const tagItem = document.createElement('div');
+        tagItem.className = 'stash-tag-item selected';
+        tagItem.dataset.id = newTag.id;
+        tagItem.dataset.name = newTag.name;
+        tagItem.innerHTML = `<span class="stash-tag-name">${newTag.name}</span>`;
+        tagsList.insertBefore(tagItem, tagsList.firstChild);
+
+        selectedTags.push({ id: newTag.id, name: newTag.name });
+        updateDoneButton();
+
+        // Reset
+        searchInput.value = '';
+        createTagDiv.style.display = 'none';
+        createBtn.innerHTML = 'Create "<span class="stash-new-tag-name"></span>"';
+        createBtn.disabled = false;
+      } else {
+        alert('Failed to create tag: ' + (response.error || 'Unknown error'));
+        createBtn.textContent = 'Create "' + tagName + '"';
+        createBtn.disabled = false;
+      }
+    });
+  });
+
+  // Done - save selected tags
+  doneBtn.addEventListener('click', async () => {
+    doneBtn.textContent = 'Saving...';
+    doneBtn.disabled = true;
+
+    // Add each selected tag to the save
+    for (const tag of selectedTags) {
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          action: 'addTagToSave',
+          saveId: saveId,
+          tagId: tag.id,
+        }, resolve);
+      });
+    }
+
+    showToast(`Highlight saved with ${selectedTags.length} tag${selectedTags.length > 1 ? 's' : ''}!`);
+    closeModal();
+  });
+
+  // Skip - close without tagging
+  skipBtn.addEventListener('click', () => {
+    showToast('Highlight saved!');
+    closeModal();
+  });
+
+  // Close button
+  closeBtn.addEventListener('click', () => {
+    showToast('Highlight saved!');
+    closeModal();
+  });
+
+  // Click overlay to close
+  overlay.addEventListener('click', () => {
+    showToast('Highlight saved!');
+    closeModal();
+  });
+
+  // Focus search input
+  setTimeout(() => searchInput.focus(), 100);
+}
