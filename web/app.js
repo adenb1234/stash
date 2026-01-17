@@ -1950,17 +1950,18 @@ class StashApp {
 
     empty.classList.add('hidden');
 
+    // Gmail-style compact row layout
     const itemsHtml = this.feedItems.map(item => `
-      <div class="feed-item-card${item.is_seen ? ' seen' : ''}" data-id="${item.id}">
-        ${item.image_url ? `<img class="feed-item-thumbnail" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
-        <div class="feed-item-content">
-          <div class="feed-item-title">${this.escapeHtml(item.title || 'Untitled')}</div>
-          <div class="feed-item-excerpt">${this.escapeHtml(item.excerpt || '')}</div>
-          <div class="feed-item-meta">
-            <span class="feed-item-source">${this.escapeHtml(item.feeds?.title || 'Unknown')}</span>
-            ${item.author ? `<span class="feed-item-dot"></span><span>${this.escapeHtml(item.author)}</span>` : ''}
-            ${item.published_at ? `<span class="feed-item-dot"></span><span>${this.formatRelativeDate(item.published_at)}</span>` : ''}
-          </div>
+      <div class="feed-item-row${!item.is_seen ? ' unseen' : ''}" data-id="${item.id}">
+        <div class="feed-item-source-icon">📰</div>
+        <div class="feed-item-main">
+          <span class="feed-item-title">${this.escapeHtml(item.title || 'Untitled')}</span>
+          <span class="feed-item-separator">—</span>
+          <span class="feed-item-excerpt">${this.escapeHtml(item.excerpt || '')}</span>
+        </div>
+        <div class="feed-item-meta">
+          <span class="feed-item-source">${this.escapeHtml(item.feeds?.title || '')}</span>
+          <span class="feed-item-time">${item.published_at ? this.formatRelativeDate(item.published_at) : ''}</span>
         </div>
         <div class="feed-item-actions">
           <button class="feed-item-save-btn${item.is_saved ? ' saved' : ''}" data-item-id="${item.id}" title="${item.is_saved ? 'Saved to library' : 'Save to library'}">
@@ -1972,7 +1973,7 @@ class StashApp {
       </div>
     `).join('');
 
-    container.innerHTML = controlsHtml + `<div class="feed-items-grid">${itemsHtml}</div>`;
+    container.innerHTML = controlsHtml + `<div class="feed-items-list">${itemsHtml}</div>`;
     this.bindFeedControlEvents();
     this.bindFeedItemEvents();
   }
@@ -1999,12 +2000,12 @@ class StashApp {
 
   bindFeedItemEvents() {
     // Click to open item
-    document.querySelectorAll('.feed-item-card').forEach(card => {
-      card.addEventListener('click', (e) => {
+    document.querySelectorAll('.feed-item-row').forEach(row => {
+      row.addEventListener('click', (e) => {
         // Don't open if clicking save button
         if (e.target.closest('.feed-item-save-btn')) return;
 
-        const id = card.dataset.id;
+        const id = row.dataset.id;
         const item = this.feedItems.find(i => i.id === id);
         if (item) {
           this.openFeedItem(item);
