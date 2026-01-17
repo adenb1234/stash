@@ -885,8 +885,14 @@ class StashApp {
       stats: 'Stats',
       feeds: 'Feed Inbox',
       'manage-feeds': 'Manage Feeds',
+      'feed-reader': '',
     };
-    document.getElementById('view-title').textContent = titles[view] || 'Saves';
+    const titleEl = document.getElementById('view-title');
+    if (titleEl) {
+      titleEl.textContent = titles[view] || 'Saves';
+      // Hide title for feed reader view
+      titleEl.parentElement.style.display = view === 'feed-reader' ? 'none' : '';
+    }
 
     if (view === 'stats') {
       this.showStats();
@@ -896,6 +902,8 @@ class StashApp {
       this.loadFeedItems();
     } else if (view === 'manage-feeds') {
       this.renderManageFeedsView();
+    } else if (view === 'feed-reader') {
+      this.renderFeedReaderView();
     } else {
       this.loadSaves();
     }
@@ -2053,36 +2061,95 @@ class StashApp {
 
       item.is_seen = true;
       this.updateFeedUnreadBadge();
+
+      // Update the row to remove unseen styling
+      const row = document.querySelector(`.feed-item-row[data-id="${item.id}"]`);
+      if (row) row.classList.remove('unseen');
     }
 
-    // Open in reading pane
-    const pane = document.getElementById('reading-pane');
-    this.currentSave = null;
+    // Store current feed item for back navigation
+    this.currentFeedItem = item;
 
-    document.getElementById('reading-title').textContent = item.title || 'Untitled';
-    document.getElementById('reading-meta').innerHTML = `
-      ${item.feeds?.title || ''} ${item.author ? `· ${item.author}` : ''} · ${item.published_at ? new Date(item.published_at).toLocaleDateString() : ''}
-    `;
+    // Open full-page reader view
+    this.setView('feed-reader');
+  }
 
-    // Hide audio player for feed items
-    document.getElementById('audio-player').classList.add('hidden');
-    document.getElementById('audio-generating').classList.add('hidden');
+  renderFeedReaderView() {
+    const container = document.getElementById('saves-container');
+    const empty = document.getElementById('empty-state');
+    const loading = document.getElementById('loading');
+
+    container.classList.remove('saves-grid');
+    loading.classList.add('hidden');
+    empty.classList.add('hidden');
+
+    const item = this.currentFeedItem;
+    if (!item) {
+      this.setView('feeds');
+      return;
+    }
 
     const content = item.content || item.excerpt || 'No content available.';
-    document.getElementById('reading-body').innerHTML = this.renderMarkdown(content) + `
-      <p style="margin-top: 24px;"><a href="${item.url}" target="_blank" style="color: var(--primary);">Read original →</a></p>
+    const publishedDate = item.published_at ? new Date(item.published_at).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    }) : '';
+
+    container.innerHTML = `
+      <div class="feed-reader-view">
+        <div class="feed-reader-header">
+          <button class="feed-reader-back-btn" id="feed-reader-back-btn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="19" y1="12" x2="5" y2="12"></line>
+              <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+            Back
+          </button>
+          <div class="feed-reader-header-actions">
+            <button class="feed-reader-action-btn${item.is_saved ? ' saved' : ''}" id="feed-reader-save-btn" title="${item.is_saved ? 'Saved to library' : 'Save to library'}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="${item.is_saved ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </button>
+            <a href="${item.url || '#'}" target="_blank" class="feed-reader-action-btn" title="Open original">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          </div>
+        </div>
+        <article class="feed-reader-article">
+          <div class="feed-reader-source">${this.escapeHtml(item.feeds?.title || '')}</div>
+          <h1 class="feed-reader-title">${this.escapeHtml(item.title || 'Untitled')}</h1>
+          <div class="feed-reader-meta">
+            ${item.author ? `<span class="feed-reader-author">${this.escapeHtml(item.author)}</span>` : ''}
+            ${publishedDate ? `<span class="feed-reader-date">${publishedDate}</span>` : ''}
+          </div>
+          <div class="feed-reader-content">
+            ${this.renderMarkdown(content)}
+          </div>
+        </article>
+      </div>
     `;
 
-    document.getElementById('open-original-btn').href = item.url || '#';
+    // Bind events
+    document.getElementById('feed-reader-back-btn')?.addEventListener('click', () => {
+      this.currentFeedItem = null;
+      this.setView('feeds');
+    });
 
-    // Hide archive/favorite for feed items (not saved yet)
-    document.getElementById('archive-btn').classList.add('hidden');
-    document.getElementById('favorite-btn').classList.add('hidden');
-    document.getElementById('delete-btn').classList.add('hidden');
-
-    pane.classList.remove('hidden');
-    requestAnimationFrame(() => {
-      pane.classList.add('open');
+    document.getElementById('feed-reader-save-btn')?.addEventListener('click', async () => {
+      await this.saveFeedItemToLibrary(item.id);
+      // Update button state
+      const btn = document.getElementById('feed-reader-save-btn');
+      if (btn) {
+        btn.classList.add('saved');
+        btn.title = 'Saved to library';
+        btn.querySelector('svg').setAttribute('fill', 'currentColor');
+      }
     });
   }
 
@@ -2454,8 +2521,25 @@ class StashApp {
                   <div class="feed-url">${this.escapeHtml(feed.feed_url)}</div>
                 </div>
               </div>
-              <div class="feed-categories-tags">
-                ${categories.map(c => `<span class="feed-category-tag" style="background: ${c.color}20; color: ${c.color}">${this.escapeHtml(c.name)}</span>`).join('')}
+              <div class="feed-categories-cell">
+                <div class="feed-categories-tags feed-categories-clickable" data-feed-id="${feed.id}">
+                  ${categories.length > 0
+                    ? categories.map(c => `<span class="feed-category-tag" style="background: ${c.color}20; color: ${c.color}">${this.escapeHtml(c.name)}</span>`).join('')
+                    : '<span class="add-category-hint">+ Add category</span>'}
+                </div>
+                <div class="feed-category-dropdown hidden" data-feed-id="${feed.id}">
+                  ${this.feedCategories.map(c => {
+                    const isSelected = categoryIds.includes(c.id);
+                    return `
+                      <label class="category-checkbox-item">
+                        <input type="checkbox" data-category-id="${c.id}" data-feed-id="${feed.id}" ${isSelected ? 'checked' : ''}>
+                        <span class="category-color-dot" style="background: ${c.color}"></span>
+                        ${this.escapeHtml(c.name)}
+                      </label>
+                    `;
+                  }).join('')}
+                  ${this.feedCategories.length === 0 ? '<div class="dropdown-empty">No categories yet</div>' : ''}
+                </div>
               </div>
               <div class="feed-item-count">${feed.item_count || 0}</div>
               <div class="feed-row-actions">
@@ -2549,6 +2633,32 @@ class StashApp {
         this.addCategoryFromManageView();
       }
     });
+
+    // Category dropdown toggle
+    document.querySelectorAll('.feed-categories-clickable').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const feedId = el.dataset.feedId;
+        this.toggleCategoryDropdown(feedId);
+      });
+    });
+
+    // Category checkbox changes
+    document.querySelectorAll('.feed-category-dropdown input[type="checkbox"]').forEach(checkbox => {
+      checkbox.addEventListener('change', async (e) => {
+        e.stopPropagation();
+        const feedId = checkbox.dataset.feedId;
+        const categoryId = checkbox.dataset.categoryId;
+        await this.toggleFeedCategory(feedId, categoryId, checkbox.checked);
+      });
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.feed-categories-cell')) {
+        document.querySelectorAll('.feed-category-dropdown').forEach(d => d.classList.add('hidden'));
+      }
+    }, { once: true });
   }
 
   async refreshSingleFeed(feedId) {
@@ -2657,6 +2767,58 @@ class StashApp {
     } catch (err) {
       console.error('Error adding category:', err);
       alert('Failed to add category');
+    }
+  }
+
+  toggleCategoryDropdown(feedId) {
+    // Close all other dropdowns
+    document.querySelectorAll('.feed-category-dropdown').forEach(d => {
+      if (d.dataset.feedId !== feedId) {
+        d.classList.add('hidden');
+      }
+    });
+    // Toggle this one
+    const dropdown = document.querySelector(`.feed-category-dropdown[data-feed-id="${feedId}"]`);
+    if (dropdown) {
+      dropdown.classList.toggle('hidden');
+    }
+  }
+
+  async toggleFeedCategory(feedId, categoryId, isAdding) {
+    try {
+      if (isAdding) {
+        // Add feed to category
+        const { error } = await this.supabase
+          .from('feed_category_feeds')
+          .insert({ feed_id: feedId, category_id: categoryId });
+        if (error) throw error;
+      } else {
+        // Remove feed from category
+        const { error } = await this.supabase
+          .from('feed_category_feeds')
+          .delete()
+          .eq('feed_id', feedId)
+          .eq('category_id', categoryId);
+        if (error) throw error;
+      }
+
+      // Reload feeds to get updated category relationships
+      await this.loadFeeds();
+      this.renderFeedCategoriesSidebar();
+
+      // Update just the tags display for this feed without closing dropdown
+      const feed = this.feeds.find(f => f.id === feedId);
+      const categoryIds = (feed?.feed_category_feeds || []).map(fcf => fcf.category_id);
+      const categories = this.feedCategories.filter(c => categoryIds.includes(c.id));
+      const tagsEl = document.querySelector(`.feed-categories-clickable[data-feed-id="${feedId}"]`);
+      if (tagsEl) {
+        tagsEl.innerHTML = categories.length > 0
+          ? categories.map(c => `<span class="feed-category-tag" style="background: ${c.color}20; color: ${c.color}">${this.escapeHtml(c.name)}</span>`).join('')
+          : '<span class="add-category-hint">+ Add category</span>';
+      }
+    } catch (err) {
+      console.error('Error toggling category:', err);
+      alert('Failed to update category');
     }
   }
 }
