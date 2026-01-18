@@ -144,6 +144,18 @@ showToast('Error', true);      // error (red)
 
 **Phase 1 COMPLETE** — Core save/highlight/tag functionality working
 **Phase 2 COMPLETE** — RSS feed subscriptions with full reader view, favicons via Google's favicon service
+**Phase 2.5 COMPLETE** — Highlight imports from Readwise Reader and WebHighlights
+
+**Current Data:**
+- 563 highlights total (209 from Reader, 332 from WebHighlights, 22 from extension)
+- 332 highlights have user notes
+- 54 tags with 608 tag-to-highlight links
+
+**Highlights View Features:**
+- Tag filter dropdown (shows only tags used by highlights)
+- Notes displayed on highlight cards
+- `highlightTagFilter` state in app.js controls filtering
+- `populateHighlightTagFilter()` loads tags for dropdown
 
 **Feed Inbox UI:**
 - Favicons displayed next to each item (uses `https://www.google.com/s2/favicons?domain=...&sz=32`)
@@ -156,6 +168,17 @@ showToast('Error', true);      // error (red)
 - `e` — Mark selected item as seen
 - `Esc` — Return from reader to inbox
 - `o` (in reader) — Open original article URL
+
+**Import Scripts (in repo root, for reference):**
+- `import-reader.js` — Import highlights from Readwise Reader API
+- `import-notes.js` — Import notes from Readwise CSV export
+- `import-webhighlights.js` — Import from WebHighlights browser extension backup
+- `fix-tags.js`, `fix-notes.js` — Utility scripts for fixing tag/note mappings
+
+**Data Sources:**
+- `source='import'` — Readwise Reader highlights
+- `source='webhighlights'` — WebHighlights browser extension
+- `source='extension'` — Chrome extension saves
 
 **Next:** Phase 3 — TBD (see STASH_PROJECT_PLAN_1.md)
 
