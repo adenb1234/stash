@@ -44,9 +44,26 @@ Actions handled in `content.js`: `extractArticle`, `getSelection`, `showToast`, 
 - `index.html` — Main HTML with sidebar nav, modals, reading pane
 - `styles.css` — All styling; dark mode via `[data-theme="dark"]` attribute
 
-### Database (`supabase/schema.sql`)
+**Key feed methods in app.js:**
+- `loadFeeds()`, `loadFeedCategories()`, `loadFeedItems()` — Data loading
+- `renderFeedInbox()` — Feed item list with selection state
+- `renderFeedReaderView()` — Full-page article reader
+- `renderManageFeedsView()` — Feed management with category dropdowns
+- `subscribeFeed()`, `refreshFeeds()` — Edge Function calls
+- `markFeedItemSeen()`, `openFeedItem()`, `selectFeedItem()` — Item interactions
+- `toggleFeedCategory()` — Category assignment on Manage Feeds page
 
-**Tables:** `saves`, `tags`, `save_tags` (junction), `folders`, `user_preferences`
+**Views:** `setView()` handles: `'all'`, `'highlights'`, `'articles'`, `'kindle'`, `'archived'`, `'feeds'`, `'feed-reader'`, `'manage-feeds'`, `'weekly-review'`, `'stats'`
+
+### Database
+
+**Core tables** (`supabase/schema.sql`): `saves`, `tags`, `save_tags` (junction), `folders`, `user_preferences`
+
+**Feed tables** (`supabase/migrations/002_feeds.sql`):
+- `feeds` — Feed subscriptions (feed_url, title, favicon, last_fetched_at)
+- `feed_items` — Individual articles from feeds (guid, url, title, content, is_seen, is_saved)
+- `feed_categories` — Categories for organizing feeds (name, color)
+- `feed_category_feeds` — Junction table (many-to-many feeds ↔ categories)
 
 **Key columns on `saves`:**
 - `highlight` — Selected text (null for full page saves)
@@ -57,6 +74,15 @@ Actions handled in `content.js`: `extractArticle`, `getSelection`, `showToast`, 
 **Search:** `search_saves(query, user_id)` function with weighted ranking (title > excerpt/highlight > content)
 
 **RLS:** Configured for single-user mode with hardcoded USER_ID in config files.
+
+### Edge Functions (`supabase/functions/`)
+
+- `save-page/index.ts` — Extracts article content from URL using Readability.js
+- `fetch-feeds/index.ts` — RSS/Atom feed operations:
+  - `discover` — Find feed URL from website (handles Substack → /feed conversion)
+  - `subscribe` — Add new feed, fetch initial items
+  - `fetch` — Refresh single feed
+  - `fetch_all` — Refresh all feeds for user
 
 ## Development
 
@@ -103,12 +129,20 @@ showToast('Error', true);      // error (red)
 - PWA installable
 
 **Phase 2 COMPLETE** — RSS feed subscriptions:
-- Feed inbox with Unseen/Seen tabs
-- Feed categories (many-to-many with feeds)
+- Feed inbox with Unseen/Seen tabs, compact row layout (title, source, date)
+- Feed categories (many-to-many with feeds, managed on Manage Feeds page)
 - Add Feed modal with URL discovery (supports RSS, Atom, Substack)
-- Manage Feeds page (unsubscribe, refresh, category management)
-- Manual refresh (Edge Function, no background jobs for MVP)
+- Manage Feeds page with category dropdown for each feed
+- Full-page reader view for feed items (not sidebar)
+- Manual refresh via Edge Function
 - Save feed items to library
 - Unread count badge in sidebar
+
+**Feed Keyboard Shortcuts:**
+- `↓`/`↑` or `j`/`k` — Navigate feed items (visual selection with purple outline)
+- `o` or `Enter` — Open selected item in reader view
+- `e` — Mark selected item as seen (removes from Unseen)
+- `Esc` — Return from reader to inbox
+- `o` (in reader) — Open original article URL in new tab
 
 **Next:** Phase 3 — TBD (see STASH_PROJECT_PLAN_1.md)
