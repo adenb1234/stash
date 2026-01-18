@@ -16,6 +16,33 @@ Self-hosted read-it-later app (Reader.io replacement). Saves articles, highlight
 - **Hosting:** Vercel (auto-deploys from main branch)
 - **Extension:** Chrome Manifest V3
 
+## Development Commands
+
+No build step. Edit files directly.
+
+```bash
+# Local web development
+cd web && python3 -m http.server 3000
+
+# Deploy web changes (auto-deploys on push to main)
+git push
+
+# Test extension changes
+# 1. chrome://extensions → enable Developer mode
+# 2. Load unpacked → select extension/ folder
+# 3. Click refresh icon after changes
+
+# Deploy Edge Functions
+supabase login
+supabase link --project-ref <project-id>
+supabase functions deploy save-page
+supabase functions deploy fetch-feeds
+supabase functions deploy send-digest
+
+# Run database migrations
+supabase db push
+```
+
 ## Architecture
 
 ### Chrome Extension (`extension/`)
@@ -77,25 +104,16 @@ Actions handled in `content.js`: `extractArticle`, `getSelection`, `showToast`, 
 
 ### Edge Functions (`supabase/functions/`)
 
+All functions are Deno-based TypeScript. Deployed via `supabase functions deploy <name>`.
+
 - `save-page/index.ts` — Extracts article content from URL using Readability.js
-- `fetch-feeds/index.ts` — RSS/Atom feed operations:
+- `fetch-feeds/index.ts` — RSS/Atom feed operations (called with `action` parameter):
   - `discover` — Find feed URL from website (handles Substack → /feed conversion)
   - `subscribe` — Add new feed, fetch initial items
-  - `fetch` — Refresh single feed
+  - `fetch` — Refresh single feed by `feed_id`
   - `fetch_all` — Refresh all feeds for user
-
-## Development
-
-No build step. Edit files directly.
-
-```bash
-# Deploy web changes (auto-deploys on push)
-git push
-
-# Test extension changes
-# 1. chrome://extensions → click refresh on Stash
-# 2. Test on any webpage
-```
+- `send-digest/index.ts` — Weekly email digest via Resend API
+- `save-kindle/index.ts` — Kindle clippings import
 
 ## Key Patterns
 
@@ -121,28 +139,26 @@ showToast('Error', true);      // error (red)
 
 ## Current State
 
-**Phase 1 COMPLETE** — Core features working:
-- Chrome extension saves articles and highlights
-- Tag selector modal with notes field appears after saving highlights
-- Web app: saves list, reading pane, folder/tag filtering, search, favorites, archive
-- Kindle import working
-- PWA installable
+**Phase 1 COMPLETE** — Core save/highlight/tag functionality working
+**Phase 2 COMPLETE** — RSS feed subscriptions with full reader view, favicons via Google's favicon service
 
-**Phase 2 COMPLETE** — RSS feed subscriptions:
-- Feed inbox with Unseen/Seen tabs, compact row layout (title, source, date)
-- Feed categories (many-to-many with feeds, managed on Manage Feeds page)
-- Add Feed modal with URL discovery (supports RSS, Atom, Substack)
-- Manage Feeds page with category dropdown for each feed
-- Full-page reader view for feed items (not sidebar)
-- Manual refresh via Edge Function
-- Save feed items to library
-- Unread count badge in sidebar
+**Feed Inbox UI:**
+- Favicons displayed next to each item (uses `https://www.google.com/s2/favicons?domain=...&sz=32`)
+- Unseen/Seen tabs with unread count badge
+- Compact row layout: favicon, title, source, relative date
 
 **Feed Keyboard Shortcuts:**
-- `↓`/`↑` or `j`/`k` — Navigate feed items (visual selection with purple outline)
+- `↓`/`↑` or `j`/`k` — Navigate feed items (visual selection)
 - `o` or `Enter` — Open selected item in reader view
-- `e` — Mark selected item as seen (removes from Unseen)
+- `e` — Mark selected item as seen
 - `Esc` — Return from reader to inbox
-- `o` (in reader) — Open original article URL in new tab
+- `o` (in reader) — Open original article URL
 
 **Next:** Phase 3 — TBD (see STASH_PROJECT_PLAN_1.md)
+
+## Configuration
+
+Both `extension/config.js` and `web/config.js` require:
+- `SUPABASE_URL` — Your Supabase project URL
+- `SUPABASE_ANON_KEY` — Public anon key
+- `USER_ID` — Hardcoded user UUID (single-user mode, bypasses auth)
