@@ -7,6 +7,7 @@ class StashApp {
     this.currentSave = null;
     this.currentFolder = null;
     this.currentTag = null;
+    this.highlightTagFilter = null; // Tag filter for highlights view
     this.saves = [];
     this.tags = [];
     this.folders = [];
@@ -110,6 +111,12 @@ class StashApp {
 
     // Sort
     document.getElementById('sort-select').addEventListener('change', (e) => {
+      this.loadSaves();
+    });
+
+    // Tag filter for highlights view
+    document.getElementById('tag-filter-select').addEventListener('change', (e) => {
+      this.highlightTagFilter = e.target.value || null;
       this.loadSaves();
     });
 
@@ -517,6 +524,25 @@ class StashApp {
       query = query.eq('folder_id', this.currentFolder);
     }
 
+    // Apply tag filter for highlights view
+    if (this.currentView === 'highlights' && this.highlightTagFilter) {
+      // Get save IDs that have this tag
+      const { data: taggedSaves } = await this.supabase
+        .from('save_tags')
+        .select('save_id')
+        .eq('tag_id', this.highlightTagFilter);
+
+      if (!taggedSaves || taggedSaves.length === 0) {
+        loading.classList.add('hidden');
+        empty.classList.remove('hidden');
+        this.saves = [];
+        return;
+      }
+
+      const saveIds = taggedSaves.map(ts => ts.save_id);
+      query = query.in('id', saveIds);
+    }
+
     const { data, error } = await query;
 
     loading.classList.add('hidden');
@@ -558,6 +584,40 @@ class StashApp {
         ${tags.map(tag => `<span class="save-card-tag" style="background: ${tag.color || '#6366f1'}20; color: ${tag.color || '#6366f1'}">${this.escapeHtml(tag.name)}</span>`).join('')}
       </div>
     `;
+  }
+
+  // Populate the tag filter dropdown for highlights view
+  async populateHighlightTagFilter() {
+    const select = document.getElementById('tag-filter-select');
+    const currentValue = select.value;
+
+    // Get tags that are used by highlights
+    const { data: highlightTags } = await this.supabase
+      .from('save_tags')
+      .select('tag_id, tags(id, name), saves!inner(highlight)')
+      .not('saves.highlight', 'is', null);
+
+    // Get unique tags
+    const tagMap = new Map();
+    if (highlightTags) {
+      for (const ht of highlightTags) {
+        if (ht.tags && !tagMap.has(ht.tags.id)) {
+          tagMap.set(ht.tags.id, ht.tags.name);
+        }
+      }
+    }
+
+    // Sort tags alphabetically
+    const sortedTags = [...tagMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+
+    // Build options
+    select.innerHTML = `<option value="">All Tags (${sortedTags.length})</option>` +
+      sortedTags.map(([id, name]) => `<option value="${id}">${this.escapeHtml(name)}</option>`).join('');
+
+    // Restore selection if still valid
+    if (currentValue && tagMap.has(currentValue)) {
+      select.value = currentValue;
+    }
   }
 
   renderSaves() {
@@ -971,6 +1031,17 @@ class StashApp {
       titleEl.textContent = titles[view] || 'Saves';
       // Hide title for feed reader view
       titleEl.parentElement.style.display = view === 'feed-reader' ? 'none' : '';
+    }
+
+    // Show/hide tag filter for highlights view
+    const tagFilterSelect = document.getElementById('tag-filter-select');
+    if (view === 'highlights') {
+      this.populateHighlightTagFilter();
+      tagFilterSelect.classList.remove('hidden');
+    } else {
+      tagFilterSelect.classList.add('hidden');
+      this.highlightTagFilter = null;
+      tagFilterSelect.value = '';
     }
 
     if (view === 'stats') {

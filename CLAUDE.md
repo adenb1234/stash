@@ -38,6 +38,7 @@ supabase link --project-ref <project-id>
 supabase functions deploy save-page
 supabase functions deploy fetch-feeds
 supabase functions deploy send-digest
+supabase functions deploy save-kindle
 
 # Run database migrations
 supabase db push
@@ -100,7 +101,7 @@ Actions handled in `content.js`: `extractArticle`, `getSelection`, `showToast`, 
 
 **Search:** `search_saves(query, user_id)` function with weighted ranking (title > excerpt/highlight > content)
 
-**RLS:** Configured for single-user mode with hardcoded USER_ID in config files.
+**RLS:** Single-user mode bypasses normal auth — RLS policies use `auth.uid() = user_id` but the service role key in Edge Functions and hardcoded USER_ID in config files provide access.
 
 ### Edge Functions (`supabase/functions/`)
 
@@ -114,6 +115,8 @@ All functions are Deno-based TypeScript. Deployed via `supabase functions deploy
   - `fetch_all` — Refresh all feeds for user
 - `send-digest/index.ts` — Weekly email digest via Resend API
 - `save-kindle/index.ts` — Kindle clippings import
+
+**Feed state in app.js:** `feeds`, `feedCategories`, `feedItems`, `feedViewTab` ('unseen'|'seen'), `currentFeedCategory`, `discoveredFeed`, `selectedFeedItemIndex`
 
 ## Key Patterns
 
