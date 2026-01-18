@@ -2314,6 +2314,19 @@ input, select {
   transform: translateX(20px);
 }
 
+.feed-item-favicon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+
+.feed-item-favicon-placeholder {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
 .feed-item-title {
   flex: 1;
   font-size: 14px;

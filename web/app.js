@@ -2043,14 +2043,19 @@ class StashApp {
 
     empty.classList.add('hidden');
 
-    // Simplified row layout: title, source, date
-    const itemsHtml = this.feedItems.map(item => `
+    // Simplified row layout: favicon, title, source, date
+    const itemsHtml = this.feedItems.map(item => {
+      const siteUrl = item.feeds?.site_url || '';
+      const domain = siteUrl ? new URL(siteUrl).hostname : '';
+      const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=32` : '';
+      return `
       <div class="feed-item-row${!item.is_seen ? ' unseen' : ''}" data-id="${item.id}">
+        ${faviconUrl ? `<img class="feed-item-favicon" src="${faviconUrl}" alt="" width="16" height="16">` : '<span class="feed-item-favicon-placeholder"></span>'}
         <span class="feed-item-title">${this.escapeHtml(item.title || 'Untitled')}</span>
         <span class="feed-item-source">${this.escapeHtml(item.feeds?.title || '')}</span>
         <span class="feed-item-time">${item.published_at ? this.formatRelativeDate(item.published_at) : ''}</span>
       </div>
-    `).join('');
+    `}).join('');
 
     container.innerHTML = controlsHtml + `<div class="feed-items-list">${itemsHtml}</div>`;
     this.bindFeedControlEvents();
