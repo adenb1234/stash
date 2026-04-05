@@ -1,6 +1,6 @@
 # Stash
 
-A self-hosted read-it-later app. Replaced a host of former apps to have my note-taking, blog collation, and article highlighting all in one place.
+A self-hosted read-it-later app. Replaced a host of former apps to have my note-taking, RSS feeds, and article highlighting all in one place.
 
 Forked from [Kevin Roose's Stash](https://github.com/kbroose/stash). Added:
 
@@ -9,8 +9,7 @@ Forked from [Kevin Roose's Stash](https://github.com/kbroose/stash). Added:
 - **Feed Keyboard Shortcuts** - `j`/`k` to navigate, `o` to open, `e` to mark seen, `z` to undo
 - **In-Reader Highlighting** - Select any text while reading to save it as a highlight
 - **Podcast Support** - Save and listen to podcast episodes
-- **Readwise Reader Import** - Migrate existing highlights from Readwise Reader
-- **WebHighlights Import** - Import highlights from the WebHighlights browser extension
+- **Highlight Import** - Migrate existing highlights from third-party apps
 - **OpenAI TTS** - Text-to-speech via OpenAI's API (in place of Edge TTS)
 
 ## Quick Start
