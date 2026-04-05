@@ -4,13 +4,22 @@ A simple, self-hosted read-it-later app. Save articles, highlights, and Kindle n
 
 **Your data. Your server. No subscription.**
 
+Forked from [Kevin Roose's Stash](https://github.com/kbroose/stash) — thanks Kevin for the foundation. This fork adds:
+
+- **RSS Feed Reader** - Subscribe to feeds with category organization and keyboard shortcuts (`j`/`k`, `o`, `e`)
+- **In-Reader Highlighting** - Select any text while reading to save it as a highlight
+- **Podcast Support** - Save and listen to podcast episodes
+- **Readwise Reader Import** - Migrate your existing highlights from Readwise Reader
+- **WebHighlights Import** - Import highlights from the WebHighlights browser extension
+- **OpenAI TTS** - Higher-quality text-to-speech via OpenAI's API
+
 ## Features
 
 - **Chrome Extension** - Save pages and highlights with one click
 - **Web App** - Access your saves from any device
 - **Kindle Sync** - Import highlights from your Kindle library
 - **Full-Text Search** - Find anything you've saved
-- **Text-to-Speech** - Listen to articles with neural voices (free)
+- **Text-to-Speech** - Listen to articles with neural voices
 - **iOS Shortcut** - Save from Safari on iPhone/iPad
 - **Bookmarklet** - Works in any browser
 
