@@ -1,0 +1,10 @@
+[    1930ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://stash-hazel.vercel.app/icons/icon192.png:0
+[    1931ms] [WARNING] Error while trying to use the following icon from the Manifest: https://stash-hazel.vercel.app/icons/icon192.png (Download error or resource isn't a valid image) @ https://stash-hazel.vercel.app/:0
+[    5695ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://stash-hazel.vercel.app/social-card-square.png:0
+[  248623ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://www.google.com/s2/favicons?domain=www.econlib.org&sz=32:0
+[  248687ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://www.google.com/s2/favicons?domain=marcusnunes.substack.com&sz=32:0
+[  248769ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://www.google.com/s2/favicons?domain=onlyvariance.substack.com&sz=32:0
+[  248770ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://www.google.com/s2/favicons?domain=agglomerations.substack.com&sz=32:0
+[  307772ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://www.google.com/s2/favicons?domain=mohamedelerian.substack.com&sz=32:0
+[  307789ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://www.google.com/s2/favicons?domain=dcahn.substack.com&sz=32:0
+[  307802ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://www.google.com/s2/favicons?domain=cupidity.substack.com&sz=32:0
