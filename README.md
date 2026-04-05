@@ -20,8 +20,6 @@ Forked from [Kevin Roose's Stash](https://github.com/kbroose/stash). Added:
 4. **Load the extension** in Chrome (`chrome://extensions` > Load unpacked)
 5. **Deploy the web app** to Vercel/Netlify (free)
 
-See [SETUP.md](SETUP.md) for detailed instructions.
-
 ## Project Structure
 
 ```
