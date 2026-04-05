@@ -61,7 +61,7 @@ serve(async (req) => {
     }
 
     // Always send to Gmail relay address — Gmail filter auto-forwards to Kindle
-    const GMAIL_RELAY = Deno.env.get("KINDLE_RELAY_EMAIL") || "adenbarton@gmail.com";
+    const GMAIL_RELAY = Deno.env.get("KINDLE_RELAY_EMAIL") || "your-email@gmail.com";
 
     let title: string;
     let content: string;
