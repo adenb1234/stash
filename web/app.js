@@ -3133,15 +3133,22 @@ class StashApp {
   }
 
   async loadFeedItems() {
+    // If the user is currently reading an article (feed-reader view or
+    // reading pane open), update the data silently without rebuilding the DOM
+    // so a background refresh doesn't kick them out of what they're reading.
+    const isReading = this.currentView === 'feed-reader' || !!this.currentSave;
+
     const container = document.getElementById('saves-container');
     const loading = document.getElementById('loading');
     const empty = document.getElementById('empty-state');
 
-    this.hideError();
-    this.hideOfflineBanner();
-    loading.classList.remove('hidden');
-    empty.classList.add('hidden');
-    container.innerHTML = '';
+    if (!isReading) {
+      this.hideError();
+      this.hideOfflineBanner();
+      loading.classList.remove('hidden');
+      empty.classList.add('hidden');
+      container.innerHTML = '';
+    }
 
     let query = this.supabase
       .from('feed_items')
@@ -3163,19 +3170,26 @@ class StashApp {
         query = query.in('feed_id', feedIds.map(f => f.feed_id));
       } else {
         // No feeds in this category
-        loading.classList.add('hidden');
-        this.feedItems = [];
-        this.renderFeedInbox();
+        if (!isReading) {
+          loading.classList.add('hidden');
+          this.feedItems = [];
+          this.renderFeedInbox();
+        } else {
+          this.feedItems = [];
+        }
         return;
       }
     }
 
     const { data, error } = await query;
 
-    loading.classList.add('hidden');
+    if (!isReading) {
+      loading.classList.add('hidden');
+    }
 
     if (error) {
       console.error('Error loading feed items:', error);
+      if (isReading) return;
       const cached = this.getCachedData('stash-cache-feeditems');
       if (cached) {
         this.feedItems = cached;
@@ -3189,7 +3203,9 @@ class StashApp {
 
     this.feedItems = data || [];
     this.cacheData('stash-cache-feeditems', this.feedItems);
-    this.renderFeedInbox();
+    if (!isReading) {
+      this.renderFeedInbox();
+    }
   }
 
   renderFeedInbox() {
