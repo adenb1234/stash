@@ -36,6 +36,13 @@ class StashApp {
     this.kindleEmail = null; // Cached Kindle email for Send to Kindle feature
     this.pendingKindleSend = null; // Pending send while user sets up Kindle email
 
+    // Health tracker state
+    this.weightEntries = [];
+    this.foodEntries = [];
+    this.healthRange = 30; // 7 | 30 | 90 | 'all'
+    this.healthFoodDate = null; // ISO date string for food log day picker
+    this.healthUnit = localStorage.getItem('stash-weight-unit') || 'lbs';
+
     this.init();
   }
 
@@ -1255,6 +1262,7 @@ class StashApp {
       feeds: 'Feed Inbox',
       'manage-feeds': 'Manage Feeds',
       'feed-reader': '',
+      health: 'Health Tracker',
     };
     const titleEl = document.getElementById('view-title');
     if (titleEl) {
@@ -1296,6 +1304,8 @@ class StashApp {
       this.renderManageFeedsView();
     } else if (view === 'feed-reader') {
       this.renderFeedReaderView();
+    } else if (view === 'health') {
+      this.loadHealth();
     } else {
       this.loadSaves();
     }
@@ -5130,6 +5140,426 @@ class StashApp {
       console.error('Error toggling category:', err);
       alert('Failed to update category');
     }
+  }
+
+  // ===== Health Tracker =====
+
+  todayISO() {
+    const d = new Date();
+    const tz = d.getTimezoneOffset() * 60000;
+    return new Date(d - tz).toISOString().slice(0, 10);
+  }
+
+  formatHealthDate(iso) {
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  async loadHealth() {
+    const container = document.getElementById('saves-container');
+    const loading = document.getElementById('loading');
+    const empty = document.getElementById('empty-state');
+    container.classList.remove('saves-grid');
+    loading.classList.remove('hidden');
+    empty.classList.add('hidden');
+    container.innerHTML = '';
+
+    try {
+      const [{ data: weights }, { data: foods }] = await Promise.all([
+        this.supabase
+          .from('weight_entries')
+          .select('*')
+          .order('entry_date', { ascending: false })
+          .order('created_at', { ascending: false }),
+        this.supabase
+          .from('food_entries')
+          .select('*')
+          .order('entry_date', { ascending: false })
+          .order('created_at', { ascending: false }),
+      ]);
+      this.weightEntries = weights || [];
+      this.foodEntries = foods || [];
+    } catch (err) {
+      console.error('Error loading health data:', err);
+      this.weightEntries = [];
+      this.foodEntries = [];
+    }
+
+    if (!this.healthFoodDate) this.healthFoodDate = this.todayISO();
+    loading.classList.add('hidden');
+    this.renderHealthView();
+  }
+
+  renderHealthView() {
+    const container = document.getElementById('saves-container');
+    const today = this.todayISO();
+    const stats = this.computeHealthStats();
+    const unit = this.healthUnit;
+
+    const todayCals = this.foodEntries
+      .filter(f => f.entry_date === today)
+      .reduce((s, f) => s + (f.calories || 0), 0);
+
+    const latest = this.weightEntries[0];
+    const latestWeight = latest ? `${Number(latest.weight).toFixed(1)} ${latest.unit}` : '—';
+
+    const weightDeltaText = stats.weightDelta == null
+      ? '—'
+      : `${stats.weightDelta > 0 ? '+' : ''}${stats.weightDelta.toFixed(1)} ${unit}`;
+
+    container.innerHTML = `
+      <div class="health-view">
+        <div class="health-stats-row">
+          <div class="health-stat-card">
+            <div class="health-stat-label">Today's calories</div>
+            <div class="health-stat-value">${todayCals.toLocaleString()}</div>
+          </div>
+          <div class="health-stat-card">
+            <div class="health-stat-label">7-day avg calories</div>
+            <div class="health-stat-value">${stats.avgCal7 == null ? '—' : Math.round(stats.avgCal7).toLocaleString()}</div>
+          </div>
+          <div class="health-stat-card">
+            <div class="health-stat-label">Latest weight</div>
+            <div class="health-stat-value">${latestWeight}</div>
+          </div>
+          <div class="health-stat-card">
+            <div class="health-stat-label">30-day change</div>
+            <div class="health-stat-value ${stats.weightDelta != null && stats.weightDelta < 0 ? 'positive' : ''}">${weightDeltaText}</div>
+          </div>
+        </div>
+
+        <section class="health-section">
+          <div class="health-section-header">
+            <h3>Weight</h3>
+            <div class="health-range-tabs">
+              ${[7, 30, 90, 'all'].map(r => `
+                <button class="health-range-tab${this.healthRange === r ? ' active' : ''}" data-range="${r}">${r === 'all' ? 'All' : r + 'd'}</button>
+              `).join('')}
+            </div>
+          </div>
+
+          <form class="health-add-form" id="weight-add-form">
+            <input type="number" step="0.1" min="0" id="weight-input" placeholder="Weight" required>
+            <select id="weight-unit-select">
+              <option value="lbs"${unit === 'lbs' ? ' selected' : ''}>lbs</option>
+              <option value="kg"${unit === 'kg' ? ' selected' : ''}>kg</option>
+            </select>
+            <input type="date" id="weight-date-input" value="${today}" max="${today}">
+            <button type="submit" class="btn primary">Add</button>
+          </form>
+
+          <div class="health-chart-wrap">
+            ${this.renderWeightChart()}
+          </div>
+
+          <div class="health-entries">
+            ${this.weightEntries.length === 0
+              ? '<div class="health-empty">No weight entries yet. Add your first above.</div>'
+              : this.weightEntries.slice(0, 10).map(w => `
+                  <div class="health-entry-row">
+                    <div class="health-entry-main">
+                      <span class="health-entry-value">${Number(w.weight).toFixed(1)} ${w.unit}</span>
+                      <span class="health-entry-date">${this.formatHealthDate(w.entry_date)}</span>
+                    </div>
+                    <button class="health-entry-delete" data-weight-id="${w.id}" title="Delete">×</button>
+                  </div>
+                `).join('')}
+          </div>
+        </section>
+
+        <section class="health-section">
+          <div class="health-section-header">
+            <h3>Calories</h3>
+            <input type="date" id="food-date-input" value="${this.healthFoodDate}" max="${today}">
+          </div>
+
+          <div class="health-day-summary">
+            <span class="health-day-label">${this.formatHealthDate(this.healthFoodDate)}</span>
+            <span class="health-day-total">${this.foodEntries.filter(f => f.entry_date === this.healthFoodDate).reduce((s, f) => s + (f.calories || 0), 0).toLocaleString()} cal</span>
+          </div>
+
+          <form class="health-add-form" id="food-add-form">
+            <input type="text" id="food-name-input" placeholder="Food (e.g., Apple)" required>
+            <input type="number" min="0" step="1" id="food-calories-input" placeholder="Calories" required>
+            <button type="submit" class="btn primary">Add</button>
+          </form>
+
+          <div class="health-entries">
+            ${(() => {
+              const dayItems = this.foodEntries.filter(f => f.entry_date === this.healthFoodDate);
+              if (dayItems.length === 0) return '<div class="health-empty">No food logged for this day.</div>';
+              return dayItems.map(f => `
+                <div class="health-entry-row">
+                  <div class="health-entry-main">
+                    <span class="health-entry-name">${this.escapeHtml(f.name)}</span>
+                    <span class="health-entry-value">${Number(f.calories).toLocaleString()} cal</span>
+                  </div>
+                  <button class="health-entry-delete" data-food-id="${f.id}" title="Delete">×</button>
+                </div>
+              `).join('');
+            })()}
+          </div>
+
+          <div class="health-chart-wrap">
+            <div class="health-chart-title">Daily totals</div>
+            ${this.renderCalorieChart()}
+          </div>
+        </section>
+      </div>
+    `;
+
+    this.bindHealthEvents();
+  }
+
+  bindHealthEvents() {
+    const weightForm = document.getElementById('weight-add-form');
+    weightForm?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const weight = parseFloat(document.getElementById('weight-input').value);
+      const unit = document.getElementById('weight-unit-select').value;
+      const date = document.getElementById('weight-date-input').value;
+      if (!weight || !date) return;
+      this.addWeightEntry({ weight, unit, entry_date: date });
+    });
+
+    const foodForm = document.getElementById('food-add-form');
+    foodForm?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = document.getElementById('food-name-input').value.trim();
+      const calories = parseInt(document.getElementById('food-calories-input').value, 10);
+      if (!name || isNaN(calories)) return;
+      this.addFoodEntry({ name, calories, entry_date: this.healthFoodDate });
+    });
+
+    document.getElementById('food-date-input')?.addEventListener('change', (e) => {
+      this.healthFoodDate = e.target.value;
+      this.renderHealthView();
+    });
+
+    document.querySelectorAll('.health-range-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const r = btn.dataset.range;
+        this.healthRange = r === 'all' ? 'all' : parseInt(r, 10);
+        this.renderHealthView();
+      });
+    });
+
+    document.querySelectorAll('[data-weight-id]').forEach(btn => {
+      btn.addEventListener('click', () => this.deleteWeightEntry(btn.dataset.weightId));
+    });
+    document.querySelectorAll('[data-food-id]').forEach(btn => {
+      btn.addEventListener('click', () => this.deleteFoodEntry(btn.dataset.foodId));
+    });
+  }
+
+  async addWeightEntry({ weight, unit, entry_date }) {
+    try {
+      const { data, error } = await this.supabase
+        .from('weight_entries')
+        .insert({ user_id: this.user.id, weight, unit, entry_date })
+        .select()
+        .single();
+      if (error) throw error;
+      this.weightEntries.unshift(data);
+      this.weightEntries.sort((a, b) => (a.entry_date < b.entry_date ? 1 : -1));
+      this.healthUnit = unit;
+      localStorage.setItem('stash-weight-unit', unit);
+      this.renderHealthView();
+    } catch (err) {
+      console.error('Error adding weight:', err);
+      alert('Could not save weight: ' + err.message);
+    }
+  }
+
+  async deleteWeightEntry(id) {
+    try {
+      const { error } = await this.supabase.from('weight_entries').delete().eq('id', id);
+      if (error) throw error;
+      this.weightEntries = this.weightEntries.filter(w => w.id !== id);
+      this.renderHealthView();
+    } catch (err) {
+      console.error('Error deleting weight:', err);
+    }
+  }
+
+  async addFoodEntry({ name, calories, entry_date }) {
+    try {
+      const { data, error } = await this.supabase
+        .from('food_entries')
+        .insert({ user_id: this.user.id, name, calories, entry_date })
+        .select()
+        .single();
+      if (error) throw error;
+      this.foodEntries.unshift(data);
+      this.renderHealthView();
+    } catch (err) {
+      console.error('Error adding food:', err);
+      alert('Could not save food: ' + err.message);
+    }
+  }
+
+  async deleteFoodEntry(id) {
+    try {
+      const { error } = await this.supabase.from('food_entries').delete().eq('id', id);
+      if (error) throw error;
+      this.foodEntries = this.foodEntries.filter(f => f.id !== id);
+      this.renderHealthView();
+    } catch (err) {
+      console.error('Error deleting food:', err);
+    }
+  }
+
+  computeHealthStats() {
+    const today = this.todayISO();
+    const todayDate = new Date(today);
+
+    const last7 = new Set();
+    const last30 = new Set();
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(todayDate);
+      d.setDate(d.getDate() - i);
+      const iso = d.toISOString().slice(0, 10);
+      last30.add(iso);
+      if (i < 7) last7.add(iso);
+    }
+
+    const cal7 = this.foodEntries.filter(f => last7.has(f.entry_date));
+    const days7 = new Set(cal7.map(f => f.entry_date)).size || 0;
+    const totalCal7 = cal7.reduce((s, f) => s + (f.calories || 0), 0);
+    const avgCal7 = days7 > 0 ? totalCal7 / days7 : null;
+
+    let weightDelta = null;
+    if (this.weightEntries.length >= 2) {
+      const latest = this.weightEntries[0];
+      const cutoff = new Date(todayDate);
+      cutoff.setDate(cutoff.getDate() - 30);
+      const cutoffISO = cutoff.toISOString().slice(0, 10);
+      const older = [...this.weightEntries].reverse().find(w => w.entry_date >= cutoffISO && w.id !== latest.id)
+        || this.weightEntries[this.weightEntries.length - 1];
+      if (older && older.unit === latest.unit) {
+        weightDelta = Number(latest.weight) - Number(older.weight);
+      }
+    }
+
+    return { avgCal7, weightDelta };
+  }
+
+  filterByRange(entries) {
+    if (this.healthRange === 'all') return entries;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - this.healthRange);
+    const cutoffISO = cutoff.toISOString().slice(0, 10);
+    return entries.filter(e => e.entry_date >= cutoffISO);
+  }
+
+  renderWeightChart() {
+    const entries = this.filterByRange(this.weightEntries)
+      .filter(w => w.unit === this.healthUnit)
+      .slice()
+      .sort((a, b) => (a.entry_date < b.entry_date ? -1 : 1));
+
+    if (entries.length < 2) {
+      return '<div class="health-empty">Need at least 2 entries in the same unit to draw a chart.</div>';
+    }
+
+    const W = 600, H = 220;
+    const padL = 36, padR = 12, padT = 12, padB = 26;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+
+    const xs = entries.map(e => new Date(e.entry_date).getTime());
+    const ys = entries.map(e => Number(e.weight));
+    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+    let yMin = Math.min(...ys), yMax = Math.max(...ys);
+    const yPad = Math.max(0.5, (yMax - yMin) * 0.1);
+    yMin -= yPad; yMax += yPad;
+    if (yMax === yMin) yMax = yMin + 1;
+
+    const xScale = (x) => xMax === xMin ? padL : padL + ((x - xMin) / (xMax - xMin)) * plotW;
+    const yScale = (y) => padT + (1 - (y - yMin) / (yMax - yMin)) * plotH;
+
+    const points = entries.map(e => `${xScale(new Date(e.entry_date).getTime()).toFixed(1)},${yScale(Number(e.weight)).toFixed(1)}`).join(' ');
+    const dots = entries.map(e => `<circle cx="${xScale(new Date(e.entry_date).getTime()).toFixed(1)}" cy="${yScale(Number(e.weight)).toFixed(1)}" r="3" />`).join('');
+
+    const yTicks = 4;
+    const gridLines = [];
+    const yLabels = [];
+    for (let i = 0; i <= yTicks; i++) {
+      const v = yMin + (i / yTicks) * (yMax - yMin);
+      const y = yScale(v);
+      gridLines.push(`<line x1="${padL}" x2="${W - padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" class="health-grid-line" />`);
+      yLabels.push(`<text x="${padL - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end" class="health-axis-label">${v.toFixed(1)}</text>`);
+    }
+
+    const xLabelLeft = this.formatHealthDate(entries[0].entry_date);
+    const xLabelRight = this.formatHealthDate(entries[entries.length - 1].entry_date);
+
+    return `
+      <svg viewBox="0 0 ${W} ${H}" class="health-chart" preserveAspectRatio="none">
+        ${gridLines.join('')}
+        <polyline points="${points}" class="health-line" fill="none" />
+        ${dots}
+        ${yLabels.join('')}
+        <text x="${padL}" y="${H - 6}" class="health-axis-label">${xLabelLeft}</text>
+        <text x="${W - padR}" y="${H - 6}" text-anchor="end" class="health-axis-label">${xLabelRight}</text>
+      </svg>
+    `;
+  }
+
+  renderCalorieChart() {
+    const range = this.healthRange === 'all' ? 30 : this.healthRange;
+    const today = new Date(this.todayISO());
+    const days = [];
+    for (let i = range - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      days.push(d.toISOString().slice(0, 10));
+    }
+    const totals = days.map(iso => this.foodEntries
+      .filter(f => f.entry_date === iso)
+      .reduce((s, f) => s + (f.calories || 0), 0));
+
+    const hasAny = totals.some(v => v > 0);
+    if (!hasAny) {
+      return '<div class="health-empty">No calories logged in this range yet.</div>';
+    }
+
+    const W = 600, H = 200;
+    const padL = 36, padR = 12, padT = 12, padB = 26;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+
+    const yMax = Math.max(...totals) * 1.1 || 1;
+    const barW = plotW / days.length;
+
+    const bars = days.map((iso, i) => {
+      const v = totals[i];
+      const h = (v / yMax) * plotH;
+      const x = padL + i * barW;
+      const y = padT + plotH - h;
+      return `<rect x="${(x + barW * 0.1).toFixed(1)}" y="${y.toFixed(1)}" width="${(barW * 0.8).toFixed(1)}" height="${h.toFixed(1)}" class="health-bar" />`;
+    }).join('');
+
+    const yTicks = 4;
+    const gridLines = [];
+    const yLabels = [];
+    for (let i = 0; i <= yTicks; i++) {
+      const v = (i / yTicks) * yMax;
+      const y = padT + plotH - (v / yMax) * plotH;
+      gridLines.push(`<line x1="${padL}" x2="${W - padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" class="health-grid-line" />`);
+      yLabels.push(`<text x="${padL - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end" class="health-axis-label">${Math.round(v)}</text>`);
+    }
+
+    return `
+      <svg viewBox="0 0 ${W} ${H}" class="health-chart" preserveAspectRatio="none">
+        ${gridLines.join('')}
+        ${bars}
+        ${yLabels.join('')}
+        <text x="${padL}" y="${H - 6}" class="health-axis-label">${this.formatHealthDate(days[0])}</text>
+        <text x="${W - padR}" y="${H - 6}" text-anchor="end" class="health-axis-label">${this.formatHealthDate(days[days.length - 1])}</text>
+      </svg>
+    `;
   }
 }
 
